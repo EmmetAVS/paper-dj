@@ -119,7 +119,7 @@ carries on without it. Use `-d <path>` to change the path.
 
 ## Full command reference
 
-Plain text, several per message separated by `;` or newlines. write it to `/dev/paperdj` (this is what vision uses), send it over UDP to port 9000, or `GET /cmd?c=<url-encoded>`
+Plain text, several per message separated by `;` or newlines. Write it to `/dev/paperdj` (this is what vision uses), send it over UDP to port 9000, or `GET /cmd?c=<url-encoded>`
 for testing. Replace `a.` with `b.` for deck B.
 
 | Command | Effect |
