@@ -147,7 +147,8 @@ static void usage(const char *argv0) {
         "usage: %s [-a deckA.wav] [-b deckB.wav] [-1 sample1.wav] [-2 sample2.wav]\n"
         "          [-A bpmA] [-B bpmB] [-p http_port] [-u udp_port]\n"
         "          [-w web/index.html] [-R render_prio] [-C control_prio] [-S stream_prio]\n"
-        "defaults: -p 8080 -u 9000 -w web/index.html -R 50 -C 45 -S 40; BPM is auto-detected\n          (-A/-B 124 = \"about 124\": locks the exact tempo and beats within +-2 BPM)\n", argv0);
+        "          [-d /dev/paperdj]\n"
+        "defaults: -p 8080 -u 9000 -w web/index.html -R 50 -C 45 -S 40 -d /dev/paperdj; BPM is auto-detected\n          (-A/-B 124 = \"about 124\": locks the exact tempo and beats within +-2 BPM)\n", argv0);
 }
 
 static int load_wav(track_t *t, char *name, size_t namelen, const char *path) {
@@ -175,9 +176,10 @@ int main(int argc, char **argv) {
     const char *samples[NSAMPLES] = { NULL, NULL };
     double bpm_override[NDECKS] = { 0, 0 };
     const char *web = "web/index.html";
+    e->dev_path = "/dev/paperdj";
 
     int opt;
-    while ((opt = getopt(argc, argv, "a:b:1:2:A:B:p:u:w:R:C:S:h")) != -1) {
+    while ((opt = getopt(argc, argv, "a:b:1:2:A:B:p:u:w:R:C:S:d:h")) != -1) {
         switch (opt) {
         case 'a': paths[0] = optarg; break;
         case 'b': paths[1] = optarg; break;
@@ -191,6 +193,7 @@ int main(int argc, char **argv) {
         case 'R': e->prio_render = atoi(optarg); break;
         case 'C': e->prio_control = atoi(optarg); break;
         case 'S': e->prio_stream = atoi(optarg); break;
+        case 'd': e->dev_path = optarg; break;
         default: usage(argv[0]); return opt == 'h' ? 0 : 1;
         }
     }
@@ -227,6 +230,8 @@ int main(int argc, char **argv) {
     if (start_thread(&th_render, render_thread, e) ||
         start_thread(&th_udp, udp_control_thread, e) ||
         start_thread(&th_http, http_server_thread, e)) return 1;
+    pthread_t th_rm;   /* /dev/paperdj (QNX, root only); blocks forever, so never joined */
+    if (start_thread(&th_rm, resmgr_thread, e) == 0) pthread_detach(th_rm);
 
     fprintf(stderr, "[engine] running: %d Hz, %d-frame blocks (%.2f ms). Ctrl-C to stop.\n",
             OUT_RATE, BLOCK_FRAMES, BLOCK_FRAMES * 1000.0 / OUT_RATE);

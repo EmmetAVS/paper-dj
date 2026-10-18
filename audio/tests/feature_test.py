@@ -30,6 +30,17 @@ def stats():
     return json.load(urllib.request.urlopen(f"http://127.0.0.1:{HTTP}/stats"))
 
 
+def wait_until_up(port, timeout=15):
+    """The engine analyzes both songs before it starts listening; wait for it."""
+    end = time.time() + timeout
+    while time.time() < end:
+        try:
+            urllib.request.urlopen(f"http://127.0.0.1:{port}/stats", timeout=1).read()
+            return
+        except OSError:
+            time.sleep(0.2)
+
+
 def deck(k):
     return stats()["decks"]["ab".index(k)]
 
@@ -255,7 +266,7 @@ def test_empty_deck(exe, t):
     print("\nEmpty deck B")
     proc = subprocess.Popen([exe, "-a", f"{t}/testA_120bpm.wav", "-p", str(HTTP + 1), "-u", str(UDP + 1)],
                             stderr=subprocess.DEVNULL)
-    time.sleep(0.6)
+    wait_until_up(HTTP + 1)
     try:
         u = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         for c in ("b.play", "pad 7", "pad 8", "pad 11", "pad 12", "pad 15", "b.scratch 1", "b.platter 90",
@@ -282,7 +293,7 @@ def main():
                              "-1", f"{t}/sample1_airhorn.wav", "-2", f"{t}/sample2_zap.wav",
                              "-p", str(HTTP), "-u", str(UDP), "-w", os.path.join(ROOT, "web/index.html")],
                             stderr=subprocess.PIPE, text=True)
-    time.sleep(0.8)
+    wait_until_up(HTTP)
     try:
         st = stats()
         print("BPM detected:", [d["bpm"] for d in st["decks"]])

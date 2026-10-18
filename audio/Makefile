@@ -12,7 +12,7 @@ else
   LIBS = -lm -lpthread
 endif
 
-SRC = src/main.c src/mixer.c src/dsp.c src/wav.c src/net.c src/bpm.c
+SRC = src/main.c src/mixer.c src/dsp.c src/wav.c src/net.c src/bpm.c src/resmgr.c
 HDR = $(wildcard src/*.h)
 
 dj_engine: $(SRC) $(HDR)

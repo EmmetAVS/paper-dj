@@ -22,6 +22,7 @@ typedef struct {
     int              prio_render;
     int              prio_control;
     int              prio_stream;
+    const char      *dev_path;       /* QNX resource manager path, e.g. /dev/paperdj */
     _Atomic int      running;
 } engine_t;
 
@@ -33,6 +34,8 @@ void engine_read_snapshot(engine_t *e, mixer_snapshot_t *out);
 /* Threads (net.c) */
 void *udp_control_thread(void *arg);
 void *http_server_thread(void *arg);
+/* resmgr.c: serves /dev/paperdj on QNX (needs root); does nothing elsewhere. */
+void *resmgr_thread(void *arg);
 
 /* Raises the calling thread to SCHED_FIFO at prio. 0 = ok. */
 int  set_realtime(int prio, const char *who);

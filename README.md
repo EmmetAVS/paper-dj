@@ -5,12 +5,12 @@ a Pi Camera, turns your hands into DJ commands, mixes two songs in real time, an
 result to your phone. Built for the LA Hacks AI Hackathon 2026 (QNX challenge + Beyond the Digital).
 
 ```
-paper board ──camera──► vision (QNX, ONNX hand tracking) ──UDP──► audio engine (QNX, SCHED_FIFO) ──Wi-Fi──► phone
+paper board ──camera──► vision (QNX, OpenCV) ──UDP──► audio engine (QNX, SCHED_FIFO) ──Wi-Fi──► phone
 ```
 
 | Folder | What it is | Status |
 |---|---|---|
-| [`audio/`](audio/) | Two-deck real-time mixing engine + phone player / test board | working, 70/70 tests |
+| [`audio/`](audio/) | Two-deck real-time mixing engine + phone player / test board | working, 76/76 tests |
 | [`vision/`](vision/) | Priority helpers, engine link, two-thread pipeline skeleton (camera, pad check and hand model still fake) | skeleton running |
 
 ## The board
@@ -26,5 +26,15 @@ paper board ──camera──► vision (QNX, ONNX hand tracking) ──UDP─�
 
 Verified on our QNX Pi 5: 70/70 engine tests pass, and audio holds 0 deadline misses while CPU hogs at priority 35
 starve vision. See [`demo/README.md`](demo/README.md).
+
+## Running it on the Pi
+
+```sh
+sh ~/paper-dj/start.sh      # (re)starts everything; songs are set at the top of the file
+cat /dev/paperdj            # live status (QNX resource manager)
+echo "pad 1" > /dev/paperdj # press a pad from the shell
+```
+
+To start at boot, the Pi's boot script calls `start.sh` (see [`docs/autostart.md`](docs/autostart.md)).
 
 Start with [`audio/README.md`](audio/README.md), then [`vision/README.md`](vision/README.md).

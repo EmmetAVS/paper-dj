@@ -98,11 +98,30 @@ Options:
 - `-u`: UDP port (default 9000)
 - `-w`: path to the phone page
 - `-R` / `-C` / `-S`: render, control and phone-stream priorities (defaults 50 / 45 / 40)
+- `-d`: resource manager path (default `/dev/paperdj`)
+
+## `/dev/paperdj` (QNX resource manager)
+
+The engine also registers the board as a file. Anything on the Pi can drive it with ordinary
+file I/O, and `cat` shows the live state:
+
+```sh
+echo "pad 1" > /dev/paperdj                    # deck A play
+echo "a.vol 0.6; b.filter -0.4" > /dev/paperdj # several commands at once
+cat /dev/paperdj                               # status of both decks
+```
+
+There's no extra process: a thread inside `dj_engine` (`src/resmgr.c`) owns the path. Each
+`open`/`write`/`read` is a QNX message sent straight to that thread. While handling it, the thread
+runs at the caller's priority. A bad command makes the write fail with `EINVAL`. Creating the path
+needs root, so `start.sh` runs the engine as root. As a normal user the engine prints a note and
+carries on without it. Use `-d <path>` to change the path.
 
 ## Full command reference
 
 Plain text, several per packet separated by `;` or newlines. Send over UDP to port 9000
-(this is what vision should use), or `GET /cmd?c=<url-encoded>` for testing. Replace `a.` with `b.` for deck B.
+(this is what vision should use), write it to `/dev/paperdj`, or `GET /cmd?c=<url-encoded>`
+for testing. Replace `a.` with `b.` for deck B.
 
 | Command | Effect |
 |---|---|
@@ -165,5 +184,4 @@ exactly the contrast to demonstrate on QNX.
 ## Next steps
 
 - Keep deck state in shared memory so a restarted engine resumes where it was
-- Expose controls as a QNX resource manager (`/dev/paperdj/...`) alongside UDP
 - Optional local output through `io-audio` (USB audio adapter) for zero Wi-Fi latency
