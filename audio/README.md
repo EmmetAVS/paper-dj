@@ -62,7 +62,7 @@ Each hand controls one deck (left = A, right = B) with three sliders:
 - **Scratch**: while a hand is on the platter, the record holds still. Rotating moves the playhead forward or backward, with real reverse playback and inertia. Releasing resumes play. Works on a stopped deck too.
 - **Filter**: one knob, like a DJM. Left sweeps a resonant low-pass down from 20 kHz to 60 Hz. Right sweeps a high-pass up from 15 Hz to 8 kHz.
 
-BPM and the beat grid are detected automatically when a track loads (about 50 ms for 30 s of audio). Override with `-A 128` / `-B 126` or the `a.bpm 128` command.
+BPM and the beat grid are detected automatically when a track loads (about 50 ms for 30 s of audio). If it's wrong for a real song (it read *Music Sounds Better With You* as 96 instead of ~124), give a hint: `-A 124` searches 122–126 and locks the exact tempo **and** the beat positions. `a.bpm 128` only changes the number.
 
 ## Build and run on the Pi
 

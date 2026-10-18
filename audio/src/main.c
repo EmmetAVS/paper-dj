@@ -147,7 +147,7 @@ static void usage(const char *argv0) {
         "usage: %s [-a deckA.wav] [-b deckB.wav] [-1 sample1.wav] [-2 sample2.wav]\n"
         "          [-A bpmA] [-B bpmB] [-p http_port] [-u udp_port]\n"
         "          [-w web/index.html] [-R render_prio] [-C control_prio] [-S stream_prio]\n"
-        "defaults: -p 8080 -u 9000 -w web/index.html -R 50 -C 45 -S 40; BPM is auto-detected\n", argv0);
+        "defaults: -p 8080 -u 9000 -w web/index.html -R 50 -C 45 -S 40; BPM is auto-detected\n          (-A/-B 124 = \"about 124\": locks the exact tempo and beats within +-2 BPM)\n", argv0);
 }
 
 static int load_wav(track_t *t, char *name, size_t namelen, const char *path) {
@@ -200,11 +200,8 @@ int main(int argc, char **argv) {
         deck_t *d = &e->mixer.deck[i];
         snprintf(d->name, sizeof d->name, "(empty)");
         if (paths[i] && load_wav(&d->track, d->name, sizeof d->name, paths[i]) == 0) {
-            mixer_analyze_deck(&e->mixer, i);
-            if (bpm_override[i] > 0) {
-                d->bpm = bpm_override[i];
-                fprintf(stderr, "[deck %c] BPM overridden to %.2f\n", 'A' + i, d->bpm);
-            }
+            if (bpm_override[i] > 0) mixer_analyze_deck_hint(&e->mixer, i, bpm_override[i]);
+            else mixer_analyze_deck(&e->mixer, i);
         }
     }
     for (int k = 0; k < NSAMPLES; k++) {

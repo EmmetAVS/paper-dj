@@ -98,6 +98,8 @@ typedef struct {
 int   mixer_init(mixer_t *m);
 /* Call after a deck's track is loaded: detects BPM and the beat grid. */
 void  mixer_analyze_deck(mixer_t *m, int deck);
+/* Re-detects around a known tempo (+-2 BPM) to lock the exact BPM and beat grid. */
+void  mixer_analyze_deck_hint(mixer_t *m, int deck, double bpm_hint);
 /* Parses one text command like "a.vol 0.7", "pad 5" or "xfade 0.3". 0 = ok. */
 int   cmd_parse(const char *text, cmd_t *out);
 void  mixer_apply(mixer_t *m, const cmd_t *c);

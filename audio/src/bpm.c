@@ -32,7 +32,7 @@ static double tempo_weight(double bpm) {
     return exp(-0.5 * (o / 0.9) * (o / 0.9));
 }
 
-double bpm_detect(const track_t *t, double *first_beat) {
+static double detect(const track_t *t, double lo, double hi, int weighted, double *first_beat) {
     *first_beat = 0;
     if (!t->data || t->frames < (size_t)t->rate * 4) return 0;
     size_t hop = (size_t)(t->rate / 375);  /* 128 at 48 kHz */
@@ -64,8 +64,8 @@ double bpm_detect(const track_t *t, double *first_beat) {
 
     const double fps = (double)t->rate / hop;   /* envelope frames per second */
     double best_bpm = 0, best_s = -1, best_ph = 0, ph;
-    for (double b = 70; b <= 180; b += 0.5) {
-        double s = score(on, n, 60.0 * fps / b, &ph) * tempo_weight(b);
+    for (double b = lo; b <= hi; b += 0.5) {
+        double s = score(on, n, 60.0 * fps / b, &ph) * (weighted ? tempo_weight(b) : 1.0);
         if (s > best_s) { best_s = s; best_bpm = b; best_ph = ph; }
     }
     double coarse = best_bpm;
@@ -80,4 +80,12 @@ double bpm_detect(const track_t *t, double *first_beat) {
     double fb = (best_ph - 0.5) * hop;
     *first_beat = fb > 0 ? fb : 0;
     return round(best_bpm * 100.0) / 100.0;
+}
+
+double bpm_detect(const track_t *t, double *first_beat) {
+    return detect(t, 70, 180, 1, first_beat);
+}
+
+double bpm_detect_range(const track_t *t, double lo, double hi, double *first_beat) {
+    return detect(t, lo, hi, 0, first_beat);
 }

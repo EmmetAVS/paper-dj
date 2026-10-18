@@ -124,6 +124,16 @@ void mixer_analyze_deck(mixer_t *m, int i) {
             d->bpm, d->track.rate ? d->grid / d->track.rate : 0.0);
 }
 
+void mixer_analyze_deck_hint(mixer_t *m, int i, double hint) {
+    deck_t *d = &m->deck[i];
+    double fb;
+    double bpm = bpm_detect_range(&d->track, hint - 2.0, hint + 2.0, &fb);
+    if (bpm > 0) { d->bpm = bpm; d->grid = fb; }
+    else d->bpm = hint;
+    fprintf(stderr, "[deck %c] %s: locked to %.2f BPM (hint %.1f), first beat at %.3f s\n", 'A' + i, d->name,
+            d->bpm, hint, d->track.rate ? d->grid / d->track.rate : 0.0);
+}
+
 /* ---- command parsing ----------------------------------------------------- */
 
 enum { NOVAL, NEEDVAL, OPTVAL };
