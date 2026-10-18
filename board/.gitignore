@@ -1,0 +1,11 @@
+deck
+snap
+boarddemo
+*.log
+*.png
+*.ppm
+debug.req
+debug.auto
+rec.label
+recordings/
+*.onnx

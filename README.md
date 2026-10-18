@@ -12,6 +12,7 @@ paper board ──camera──► vision (QNX, OpenCV) ──UDP──► audio 
 |---|---|---|
 | [`audio/`](audio/) | Two-deck real-time mixing engine + phone player / test board | working, 76/76 tests |
 | [`vision/`](vision/) | Priority helpers, engine link, two-thread pipeline skeleton (camera, pad check and hand model still fake) | skeleton running |
+| [`board/`](board/) | Camera tracker for the printed sheets (buttons, sliders, dials) → engine commands, board view page | working |
 
 ## The board
 

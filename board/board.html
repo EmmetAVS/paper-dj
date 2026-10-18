@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Button Board Live</title>
+<style>
+:root{--bg:#f4f4f1;--paper:#fff;--ink:#1d1d1b;--muted:#6b6b66;--line:#1d1d1b;--hand:#ffe7a8;--press:#e8452c;--pressInk:#fff;--ok:#2f9e57;--bad:#c23b2a}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#151514;--paper:#222220;--ink:#efefea;--muted:#9a9a93;--line:#d8d8d2;--hand:#5a4a1d;--press:#ff5a3c;--pressInk:#fff}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 system-ui,-apple-system,Segoe UI,sans-serif;display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:24px 16px}
+h1{font-size:20px;margin:0 0 4px}
+.djlink{display:inline-block;margin:2px 0 10px;padding:7px 14px;border-radius:6px;background:var(--press);color:#fff;text-decoration:none;font-weight:600;font-size:14px}
+.status{color:var(--muted);font-size:14px;margin-bottom:18px;display:flex;gap:8px;align-items:center}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--bad)}
+.dot.on{background:var(--ok)}
+.board{position:relative;background:var(--paper);border-radius:6px;box-shadow:0 2px 14px rgba(0,0,0,.12);padding:9% 16%;width:min(640px,100%);aspect-ratio:4/3}
+.marker{position:absolute;width:13%;aspect-ratio:1;background:var(--ink);border-radius:2px}
+.marker::after{content:"";position:absolute;inset:22%;background:var(--paper);clip-path:polygon(0 0,40% 0,40% 40%,100% 40%,100% 100%,60% 100%,60% 70%,0 70%)}
+.tl{left:3%;top:4%}.tr{right:3%;top:4%}.bl{left:3%;bottom:4%}.br{right:3%;bottom:4%}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:3%;height:100%}
+.btn{border:2px solid var(--line);display:flex;align-items:center;justify-content:center;font-size:clamp(14px,3.2vw,22px);transition:background .08s,transform .08s,color .08s;border-radius:2px}
+.btn.hand{background:var(--hand)}
+.btn.pressed{background:var(--press);color:var(--pressInk);border-color:var(--press);transform:scale(1.06);font-weight:700}
+.last{margin-top:18px;font-size:28px;font-weight:700;min-height:1.4em}
+.legend{color:var(--muted);font-size:13px;margin-top:6px;display:flex;gap:14px;flex-wrap:wrap;justify-content:center}
+.stage{display:flex;gap:22px;align-items:stretch;justify-content:center;flex-wrap:wrap;width:100%}
+.mixer{display:flex;gap:14px;background:var(--paper);border-radius:6px;box-shadow:0 2px 14px rgba(0,0,0,.12);padding:16px 18px}
+.fader{display:flex;flex-direction:column;align-items:center;gap:8px;width:52px}.fn{font-size:12px;white-space:nowrap}
+.track{position:relative;width:12px;height:220px;border-radius:6px;background:color-mix(in srgb,var(--ink) 14%,transparent)}
+.fill{position:absolute;left:0;right:0;bottom:0;border-radius:6px;background:var(--muted)}
+.knob{position:absolute;left:50%;width:40px;height:18px;margin-left:-20px;margin-bottom:-9px;border-radius:4px;background:var(--ink);transition:transform .08s}
+.fader.active .fill{background:var(--press)}.fader.active .knob{background:var(--press);transform:scale(1.15)}
+.dial{display:flex;flex-direction:column;align-items:center;gap:8px}
+.disc{position:relative;width:110px;height:110px;border-radius:50%;border:3px solid var(--ink);background:var(--paper)}
+.needle{position:absolute;left:50%;top:50%;width:46px;height:4px;margin-top:-2px;background:var(--ink);transform-origin:0 50%;border-radius:2px}
+.dial.active .disc{border-color:var(--press)}.dial.active .needle{background:var(--press)}
+.fv{font-variant-numeric:tabular-nums;font-size:13px;color:var(--muted)}.fn{font-weight:700}
+.reset{margin-top:16px;font:inherit;font-size:15px;padding:8px 18px;border-radius:6px;border:1px solid var(--line);background:var(--paper);color:var(--ink);cursor:pointer}
+.row{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+.prompt{margin-top:14px;font-size:22px;font-weight:700;min-height:1.4em;text-align:center}
+.btn.target{outline:4px dashed #2f6fe4;outline-offset:-6px}
+.reset:active{transform:scale(.97)}
+.sw{display:inline-block;width:12px;height:12px;border-radius:2px;vertical-align:-1px;margin-right:5px}
+</style>
+</head>
+<body>
+<h1>Button board</h1>
+<a class="djlink" id="djlink" href="#" target="_blank" rel="noopener">Open the DJ deck (audio + full controls) ↗</a>
+<div class="status"><span class="dot" id="dot"></span><span id="st">connecting…</span></div>
+<div class="stage"><div class="board">
+  <div class="marker tl"></div><div class="marker tr"></div><div class="marker bl"></div><div class="marker br"></div>
+  <div class="grid" id="grid"></div>
+</div>
+<div class="mixer" id="mixer"></div></div>
+<div class="last" id="last">&nbsp;</div>
+<div class="legend"><span>touch a slider to set it · circle a dial with your fingertip to scratch</span><span><span class="sw" style="background:var(--press)"></span>pressed</span><span><span class="sw" style="background:var(--hand)"></span>hand over button</span></div>
+<div class="row"><button class="reset" id="reset">Reset (keep hands off the board)</button><button class="reset" id="rec">Record test set (≈2 min)</button></div>
+<div class="prompt" id="prompt"></div>
+<script>
+document.getElementById('djlink').href=location.protocol+'//'+location.hostname+':8082/';  // dj_engine page via the IPv4/IPv6 relay
+const grid=document.getElementById('grid'),cells=[];
+for(let i=1;i<=16;i++){const d=document.createElement('div');d.className='btn';d.textContent=i;grid.appendChild(d);cells.push(d)}
+const mixer=document.getElementById('mixer'),faders=[],dials=[];
+for(const [i,nm] of [[0,'Deck A'],[1,'Deck B']]){const dl=document.createElement('div');dl.className='dial';dl.innerHTML=`<div class="fn">${nm}</div><div class="disc"><div class="needle"></div></div><div class="fv">scratch</div>`;dials.push(dl)}
+mixer.appendChild(dials[0]);
+for(let i=1;i<=4;i++){const f=document.createElement('div');f.className='fader';f.innerHTML=`<div class="fn">${['Vol A','Filter A','Filter B','Vol B'][i-1]}</div><div class="track"><div class="fill"></div><div class="knob"></div></div><div class="fv">50%</div>`;mixer.appendChild(f);faders.push(f)}
+function showDials(e){ if(!e.dials) return; e.dials.forEach((deg,i)=>{dials[i].querySelector('.needle').style.transform=`rotate(${deg-90}deg)`; dials[i].classList.toggle('active',e.scratch===i+1)}) }
+function showFaders(e){ showDials(e); if(!e.faders) return; e.faders.forEach((v,i)=>{const f=faders[i]; f.querySelector('.fill').style.height=(v*100)+'%'; f.querySelector('.knob').style.bottom=(v*100)+'%'; f.querySelector('.fv').textContent=(i===1||i===2)?(Math.abs(v*2-1)<0.06?'off':(v<0.5?'LP ':'HP ')+Math.round(Math.abs(v*2-1)*100)+'%'):Math.round(v*100)+'%'; f.classList.toggle('active',e.pinch&&e.fader===i+1)}) }
+mixer.appendChild(dials[1]);
+const dot=document.getElementById('dot'),st=document.getElementById('st'),last=document.getElementById('last');
+let prevPressed=0;
+function show(e){
+  showFaders(e);
+  const hands=new Set(e.hands||[]);
+  cells.forEach((c,i)=>{c.classList.toggle('hand',hands.has(i+1));c.classList.toggle('pressed',e.pressed===i+1)});
+  last.innerHTML=e.scratch?('Scratching deck '+(e.scratch===1?'A':'B')):e.pinch?(['Vol A','Filter A','Filter B','Vol B'][e.fader-1]+': '+Math.round(e.faders[e.fader-1]*100)+'%'):(e.pressed?'Button '+e.pressed:'&nbsp;');
+  prevPressed=e.pressed;
+  st.textContent='live · camera '+Math.round(e.cam_fps||0)+' fps · latency '+Math.round(e.latency_ms||0)+' ms';
+}
+function connect(){
+  const es=new EventSource('events');
+  es.onopen=()=>{dot.classList.add('on');st.textContent='connected, waiting for camera…'};
+  es.onmessage=m=>{try{const e=JSON.parse(m.data); if(e.status){st.textContent=e.status}else show(e)}catch(_){}};
+  es.onerror=()=>{dot.classList.remove('on');st.textContent='disconnected, retrying…'};
+}
+document.getElementById('reset').onclick=()=>{cells.forEach(c=>c.classList.remove('hand','pressed'));last.innerHTML='&nbsp;';st.textContent='resetting: keep hands off the board…';fetch('reset')};
+// Guided labeled recording: every button pressed once, 6 hovers, hands-off gaps. Labels go to the Pi with the frames.
+const prompt=document.getElementById('prompt'); let recording=false;
+async function setLabel(sess,label){ await fetch('rec?session='+sess+(label?'&label='+label:'')); }
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+document.getElementById('rec').onclick=async()=>{
+  if(recording) return; recording=true; const sess='rig'+new Date().toISOString().replace(/[-:T.Z]/g,'').slice(0,14);
+  const order=[...Array(16).keys()].map(i=>i+1).sort(()=>Math.random()-.5), hovers=order.slice(0,6);
+  const steps=[]; steps.push(['none','Hands off the board',3000]);
+  for(const b of order){ steps.push(['press_'+b,'PRESS button '+b+' and hold',2500]); steps.push(['none','Hands off',1500]); }
+  for(const b of hovers){ steps.push(['hover_'+b,'HOVER above button '+b+' (don\'t touch)',2500]); steps.push(['none','Hands off',1500]); }
+  for(let i=0;i<steps.length;i++){ const [lab,text,ms]=steps[i]; const tgt=parseInt((lab.split('_')[1])||0);
+    cells.forEach((c,k)=>c.classList.toggle('target',k+1===tgt));
+    prompt.textContent=`${text}   (${i+1}/${steps.length})`; await setLabel(sess,null); await sleep(400); // skip the reaction time
+    await setLabel(sess,lab); await sleep(ms-400); }
+  await setLabel(sess,null); cells.forEach(c=>c.classList.remove('target')); prompt.textContent='Recording saved as '+sess+'. Thanks!'; recording=false; };
+connect();
+</script>
+</body>
+</html>
