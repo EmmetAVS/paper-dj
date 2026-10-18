@@ -91,6 +91,37 @@ shows the engine competing with vision.
 Before any immediate command is sent, pending slider values are flushed, so the engine always sees
 events in order. For example, the last platter angle always arrives before `scratch 0`.
 
+## Connecting your vision code to the engine
+
+Send commands by writing them to **`/dev/paperdj`**, the engine's QNX resource manager. Each
+`write()` is one QNX message straight to the engine, and the engine handles it at your thread's
+priority. The web page's **via /dev/paperdj** meter counts them and flashes as they arrive, which
+makes this visible during the demo.
+
+**Easiest: use `pdj_link`.** `pdj_link_open("127.0.0.1", 9000)` writes to `/dev/paperdj`
+automatically and falls back to UDP if the file isn't there. It prints which one it's using
+(`pdj_link_transport(l)`). It also handles coalescing, ordering and debouncing for you.
+
+**Or write to the file yourself** (C, C++ with OpenCV, anything):
+
+```c
+int fd = open("/dev/paperdj", O_WRONLY);   /* once, at startup */
+write(fd, "pad 5", 5);                     /* a pad press */
+write(fd, "a.vol 0.72;b.filter -0.4", 24); /* several values in one message */
+/* write() fails with EINVAL if the engine couldn't parse the command */
+```
+
+Python, for quick tests: `open("/dev/paperdj", "w", buffering=1).write("pad 1\n")`.
+
+Commands are the same text as everywhere else (full list in
+[`../audio/README.md`](../audio/README.md#full-command-reference)): `pad <1-16>`, `a.vol <0-1>`,
+`a.filter <-1..1>`, `a.scratch 1` → `a.platter <deg>` … → `a.scratch 0`, and the same with `b.` for
+the right hand. Send slider values at most ~60 times a second and skip tiny changes, as `pdj_link` does.
+
+The file exists while `dj_engine` runs as root, which `start.sh` and the boot script take care of.
+Your program can run as `qnxuser`, because the file is writable by everyone. To start your program
+with the engine, put its command on the `VISION_CMD=` line in `../start.sh`.
+
 ## Checking it on the Pi
 
 ```sh

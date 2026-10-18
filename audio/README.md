@@ -111,7 +111,7 @@ echo "a.vol 0.6; b.filter -0.4" > /dev/paperdj # several commands at once
 cat /dev/paperdj                               # status of both decks
 ```
 
-There's no extra process: a thread inside `dj_engine` (`src/resmgr.c`) owns the path. Each
+This is how vision sends its commands (`pdj_link` writes here, and falls back to UDP if the file is missing). There's no extra process: a thread inside `dj_engine` (`src/resmgr.c`) owns the path. Each
 `open`/`write`/`read` is a QNX message sent straight to that thread. While handling it, the thread
 runs at the caller's priority. A bad command makes the write fail with `EINVAL`. Creating the path
 needs root, so `start.sh` runs the engine as root. As a normal user the engine prints a note and
@@ -119,8 +119,7 @@ carries on without it. Use `-d <path>` to change the path.
 
 ## Full command reference
 
-Plain text, several per packet separated by `;` or newlines. Send over UDP to port 9000
-(this is what vision should use), write it to `/dev/paperdj`, or `GET /cmd?c=<url-encoded>`
+Plain text, several per message separated by `;` or newlines. write it to `/dev/paperdj` (this is what vision uses), send it over UDP to port 9000, or `GET /cmd?c=<url-encoded>`
 for testing. Replace `a.` with `b.` for deck B.
 
 | Command | Effect |
@@ -171,6 +170,7 @@ all 70 checks pass (including real-time priority of the phone stream and an empt
 - `deadline_misses`: blocks where the render thread woke more than one block (5.33 ms) late. On QNX this should stay **0**.
 - `max_late_us`, `render_us`, `render_us_max`: wake-up lateness and per-block render time
 - `cmd_lat_us`, `cmd_lat_us_max`: time from a command arriving to it being applied to the audio
+- `via`: commands accepted from `/dev/paperdj` (`dev`), UDP (`udp`) and the web page (`http`)
 - per-deck state: BPM, beat phase, hot cues, loop, sync, fx, scratching, and every slider
 
 **Stress demo:** while a mix plays, load the CPU (`sh ../demo/stress_demo.sh   # see demo/README.md`, then
