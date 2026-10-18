@@ -13,6 +13,8 @@ SAMPLE2=tracks/sample2_zap.wav
 VISION_CMD=                     # e.g. "$DIR/vision/build/paper_vision"  (empty = don't start vision)
 # --------------------------------------------------------------------------
 
+PATH=/proc/boot:/system/bin:/system/sbin:/usr/bin:/usr/sbin:$PATH   # boot scripts get a bare PATH
+export PATH
 DIR=$(cd "$(dirname "$0")" && pwd)
 
 if [ "$(id -u)" != 0 ]; then

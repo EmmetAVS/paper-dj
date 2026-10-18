@@ -18,8 +18,8 @@
 
 #ifdef __QNX__
 #include <errno.h>
+#include <sys/iofunc.h>     /* must come before dispatch.h so handlers get iofunc_ocb_t */
 #include <sys/dispatch.h>
-#include <sys/iofunc.h>
 #include <sys/neutrino.h>
 
 static engine_t *g_e;
