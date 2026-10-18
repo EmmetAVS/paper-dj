@@ -4,7 +4,7 @@ Renders a two-deck DJ mix on the QNX Pi and streams it over Wi-Fi to a phone's b
 Every pad and slider on the paper board becomes a one-line text command.
 
 ```
-vision process ──UDP :9000──┐
+board tracker ─/dev/paperdj─┐   (UDP :9000 also accepted)
 phone test board ─HTTP /cmd─┤
                             ▼
                   command queue (lock-free on the read side)

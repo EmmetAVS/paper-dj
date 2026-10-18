@@ -15,8 +15,9 @@ The installer:
 - does nothing if the line is already there
 
 `start.sh` sets its own `PATH`, so it works with the boot script's bare environment. It starts
-`dj_engine` as root, which lets the engine create `/dev/paperdj`. To change songs, or to start the
-vision program too (`VISION_CMD=`), edit the top of `start.sh`. The next boot picks the change up,
+`dj_engine` as root, which lets the engine create `/dev/paperdj`, then the camera tracker (`board/deck`)
+and the board pages if the tracker is built. To change songs, or turn the tracker off (`BOARD=0`),
+edit the top of `start.sh`. The next boot picks the change up,
 or run `sh ~/paper-dj/start.sh` to restart now.
 
 Check after a reboot:

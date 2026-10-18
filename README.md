@@ -5,13 +5,13 @@ a Pi Camera, turns your hands into DJ commands, mixes two songs in real time, an
 result to your phone. Built for the LA Hacks AI Hackathon 2026 (QNX challenge + Beyond the Digital).
 
 ```
-paper board ──camera──► vision (QNX, OpenCV) ──UDP──► audio engine (QNX, SCHED_FIFO) ──Wi-Fi──► phone
+paper board ──camera──► board/deck (QNX, OpenCV) ──/dev/paperdj──► audio engine (QNX, SCHED_FIFO) ──Wi-Fi──► phone
 ```
 
 | Folder | What it is | Status |
 |---|---|---|
 | [`audio/`](audio/) | Two-deck real-time mixing engine + phone player / test board | working, 76/76 tests |
-| [`vision/`](vision/) | Priority helpers, engine link, two-thread pipeline skeleton (camera, pad check and hand model still fake) | skeleton running |
+| [`vision/`](vision/) | Priority helpers, engine link library, two-thread pipeline skeleton used for the priority demo | reference; the live tracker is `board/` |
 | [`board/`](board/) | Camera tracker for the printed sheets (buttons, sliders, dials) → engine commands, board view page | working |
 
 ## The board

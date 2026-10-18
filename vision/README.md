@@ -120,7 +120,7 @@ the right hand. Send slider values at most ~60 times a second and skip tiny chan
 
 The file exists while `dj_engine` runs as root, which `start.sh` and the boot script take care of.
 Your program can run as `qnxuser`, because the file is writable by everyone. To start your program
-with the engine, put its command on the `VISION_CMD=` line in `../start.sh`.
+with the engine, add it to `../start.sh` (the live tracker, `board/deck`, already starts from there).
 
 ## Checking it on the Pi
 

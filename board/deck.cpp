@@ -1,6 +1,6 @@
 // deck: paper DJ controller for QNX / Raspberry Pi 5 / Camera Module 3.
 // Finds the printed controls (16-button grid, vertical sliders, round dials) by shape, tracks the fingertip by skin
-// colour (no reference image), and drives paper-dj's dj_engine over UDP:
+// colour (no reference image), and drives paper-dj's dj_engine by writing to /dev/paperdj (UDP :9000 fallback):
 //   button N   -> "pad N"                       (fingertip rests 250 ms on the button)
 //   sliders    -> VOL A, FILTER A, FILTER B, VOL B (left to right): "a.vol v", "a.filter x", "b.filter x", "b.vol v"
 //   dials      -> left = deck A, right = deck B: "a.scratch 1", "a.platter <deg>" ..., "a.scratch 0"
@@ -23,6 +23,8 @@
 #include <string>
 #include <vector>
 #include <arpa/inet.h>
+#include <cerrno>
+#include <fcntl.h>
 #include <netinet/in.h>
 #include <signal.h>
 #include <sys/socket.h>
@@ -138,20 +140,34 @@ static void find_scene(const cv::Mat& gray, Scene& S){
     S.paper.clear(); for(auto& v:h) S.paper.push_back(c+(v-c)*1.12f); }
 }
 
-// ---------------- UDP to dj_engine ----------------
+// ---------------- commands to dj_engine ----------------
+// Preferred: write() to /dev/paperdj, the engine's QNX resource manager (one QNX message per command, handled at
+// this process's priority). Fallback: UDP text to 127.0.0.1:9000. write() fails with EINVAL if the engine rejects it.
+static int g_dev=-1; static std::string g_devpath="/dev/paperdj";
 static int g_udp=-1; static sockaddr_in g_dst{};
-static void dj(const char* fmt,...){ if(g_udp<0) return; char b[256]; va_list ap; va_start(ap,fmt); int n=vsnprintf(b,sizeof b,fmt,ap); va_end(ap);
-  sendto(g_udp,b,n,0,(sockaddr*)&g_dst,sizeof g_dst); }
+static void udp_open(const std::string& hp){ g_udp=socket(AF_INET,SOCK_DGRAM,0); g_dst.sin_family=AF_INET;
+  g_dst.sin_port=htons(atoi(hp.substr(hp.find(':')+1).c_str())); inet_pton(AF_INET,hp.substr(0,hp.find(':')).c_str(),&g_dst.sin_addr); }
+static void dj(const char* fmt,...){ char b[256]; va_list ap; va_start(ap,fmt); int n=vsnprintf(b,sizeof b,fmt,ap); va_end(ap);
+  if(n<=0) return; if(n>(int)sizeof b-1) n=sizeof b-1;
+  if(g_dev>=0){ if(write(g_dev,b,n)==n || errno==EINVAL) return;
+    close(g_dev); g_dev=open(g_devpath.c_str(),O_WRONLY);             // engine restarted: reopen once
+    if(g_dev>=0 && write(g_dev,b,n)==n) return;
+    if(g_dev>=0){ close(g_dev); g_dev=-1; }
+    fprintf(stderr,"[dj] %s unavailable, falling back to udp 127.0.0.1:9000\n",g_devpath.c_str()); if(g_udp<0) udp_open("127.0.0.1:9000"); }
+  if(g_udp>=0) sendto(g_udp,b,n,0,(sockaddr*)&g_dst,sizeof g_dst); }
 
 int main(int argc,char** argv){
-  std::string djaddr="127.0.0.1:9000"; double dwell_ms=250, release_s=0.3, skin_th=10, skin_ymin=70, skin_grow=1.3; int skin_min=60;
+  std::string djaddr="auto"; double dwell_ms=250, release_s=0.3, skin_th=10, skin_ymin=70, skin_grow=1.3; int skin_min=60;
   for(int i=1;i<argc;i++){ std::string a=argv[i]; auto next=[&]{ if(i+1>=argc){ fprintf(stderr,"missing value for %s\n",a.c_str()); exit(2);} return std::string(argv[++i]); };
     if(a=="--dj") djaddr=next(); else if(a=="--dwell") dwell_ms=atof(next().c_str()); else if(a=="--release") release_s=atof(next().c_str());
     else if(a=="--skin-th") skin_th=atof(next().c_str()); else if(a=="--skin-ymin") skin_ymin=atof(next().c_str());
-    else { fprintf(stderr,"usage: deck [--dj host:port|off] [--dwell 250] [--release 0.3] [--skin-th 8] [--skin-ymin 40]\n"); return 2; } }
+    else { fprintf(stderr,"usage: deck [--dj auto|/dev/path|host:port|off] [--dwell 250] [--release 0.3] [--skin-th 8] [--skin-ymin 40]\n"); return 2; } }
   signal(SIGINT,on_sig); signal(SIGTERM,on_sig);
-  if(djaddr!="off"){ g_udp=socket(AF_INET,SOCK_DGRAM,0); g_dst.sin_family=AF_INET; g_dst.sin_port=htons(atoi(djaddr.substr(djaddr.find(':')+1).c_str()));
-    inet_pton(AF_INET,djaddr.substr(0,djaddr.find(':')).c_str(),&g_dst.sin_addr); fprintf(stderr,"[dj] sending to udp %s\n",djaddr.c_str()); }
+  // --dj auto (default): /dev/paperdj if the engine created it, else UDP 127.0.0.1:9000
+  if(djaddr=="auto" || djaddr[0]=='/'){ if(djaddr[0]=='/') g_devpath=djaddr; g_dev=open(g_devpath.c_str(),O_WRONLY); }
+  if(g_dev>=0) fprintf(stderr,"[dj] writing to %s\n",g_devpath.c_str());
+  else if(djaddr!="off"){ udp_open(djaddr[0]=='/'||djaddr=="auto" ? std::string("127.0.0.1:9000") : djaddr);
+    fprintf(stderr,"[dj] sending to udp %s\n",djaddr[0]=='/'||djaddr=="auto" ? "127.0.0.1:9000" : djaddr.c_str()); }
 
   camera_handle_t h=CAMERA_HANDLE_INVALID; int err=camera_open(CAMERA_UNIT_3,CAMERA_MODE_PREAD|CAMERA_MODE_PWRITE|CAMERA_MODE_DREAD,&h);
   if(err){ fprintf(stderr,"camera_open failed: %d (close other camera apps)\n",err); return 1; }

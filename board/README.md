@@ -4,11 +4,16 @@ Turns the printed sheets into DJ commands on the QNX Pi 5 with Camera Module 3, 
 No ML model in the live loop: OpenCV (from `repo.oss.qnx.com`) plus QNX's camera library.
 
 ```
-Camera Module 3 ──libcamapi NV12 callbacks──► deck ──UDP :9000──► dj_engine (audio/)
+Camera Module 3 ──libcamapi NV12 callbacks──► deck ──write() /dev/paperdj──► dj_engine (audio/)
                                                │
                                                └─ JSON events ──► board_server.py ──► http://qnxpi.local:8081 (board view)
                                                                    └─ relay :8082 ──► dj_engine page (audio + full deck)
 ```
+
+`deck` sends its commands by writing them to `/dev/paperdj`, the engine's QNX resource manager: each
+command is one QNX message, handled at deck's priority. If the file isn't there it falls back to UDP
+`127.0.0.1:9000` (`--dj host:port` forces UDP, `--dj off` disables). The engine page's **via /dev/paperdj**
+meter counts these commands.
 
 ## What the sheets do
 
@@ -34,7 +39,8 @@ Camera Module 3 ──libcamapi NV12 callbacks──► deck ──UDP :9000─�
 ```sh
 cd ~/paper-dj/audio && make && python3 tools/make_test_tracks.py   # engine + test tracks (see audio/README.md)
 cd ~/paper-dj/board && make                                         # needs: apk add opencv-dev libopencv_aruco
-./start_dj.sh                     # engine + tracker + pages;  ./start_dj.sh stop
+sh ~/paper-dj/start.sh            # engine (root, /dev/paperdj) + tracker + pages;  start.sh stop
+                                  # (board/start_dj.sh still works: it calls start.sh)
 ```
 
 Open **http://qnxpi.local:8082** for audio (tap "Tap to start audio") and **http://qnxpi.local:8081** for the board view.
