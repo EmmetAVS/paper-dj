@@ -38,6 +38,7 @@ struct library {
     int      inflight[NDECKS];        /* a song is on its way to the render thread */
     int      state[NDECKS];           /* 0 idle, 1 loading, 2 error */
     char     msg[NDECKS][160];
+    time_t   err_at[NDECKS];          /* errors fade from the page after a few seconds */
     char     loaded[NDECKS][FILE_MAX];/* song currently on each deck */
 };
 
@@ -255,6 +256,7 @@ int library_request_load(engine_t *e, int deck, const char *file) {
     pthread_mutex_lock(&l->lock);
     if (deck_busy_now(e, deck)) {
         l->state[deck] = 2;
+        l->err_at[deck] = time(NULL);
         snprintf(l->msg[deck], sizeof l->msg[deck], "Deck %c is playing. Pause it, then load.", 'A' + deck);
         pthread_mutex_unlock(&l->lock);
         return -1;
@@ -342,6 +344,9 @@ int library_json(engine_t *e, char *b, size_t cap) {
     }
     n += (size_t)snprintf(b + n, cap - n, "],\"decks\":[");
     static const char *st[] = { "idle", "loading", "error" };
+    time_t now = time(NULL);
+    for (int d = 0; d < NDECKS; d++)
+        if (l->state[d] == 2 && now - l->err_at[d] >= 6) { l->state[d] = 0; l->msg[d][0] = 0; }
     for (int d = 0; d < NDECKS && n + 400 < cap; d++) {
         n += (size_t)snprintf(b + n, cap - n, "%s{\"file\":", d ? "," : "");
         n += json_str(b + n, cap - n, l->loaded[d]);
@@ -484,6 +489,7 @@ void *library_thread(void *arg) {
                 fprintf(stderr, "[library] deck %c: %s\n", 'A' + d, lt->name);
             } else {
                 l->state[d] = 2;
+                l->err_at[d] = time(NULL);
                 snprintf(l->msg[d], sizeof l->msg[d], "Deck %c started playing before %s finished loading.",
                          'A' + d, lt->name);
             }
@@ -512,6 +518,7 @@ void *library_thread(void *arg) {
                 free(lt);
                 l->inflight[d] = 0;
                 l->state[d] = 2;
+                l->err_at[d] = time(NULL);
                 snprintf(l->msg[d], sizeof l->msg[d], "Couldn't load %s", file);
                 fprintf(stderr, "[library] %s: %s\n", file, lt ? err : "out of memory");
             }
