@@ -47,9 +47,15 @@ static void on_sig(int){ g_stop=true; g_fcv.notify_all(); }
 // ---------------- scene: sheet orientation (ArUco), 16-button grid, sliders, dials ----------------
 // Everything is ordered in SHEET coordinates: "up" comes from the printed ArUco corner markers (each marker's own
 // top edge), so the camera can look at the sheets from any angle. Without markers, image-up is assumed.
-struct Layout { bool ok=false; std::vector<cv::Point2f> quad[16]; cv::Rect2f box[16]; };
-struct Slider { cv::RotatedRect r; cv::Point2f top, bottom; float halfw; };
-struct Dial { cv::Point2f c; float rad; };
+struct Layout { bool ok=false; int direct=0; std::vector<cv::Point2f> quad[16]; cv::Rect2f box[16]; };
+// Slider: printed outline as a perspective quad; H maps image -> slider frame (x 0..1 across, y 0 = bottom .. 1 = top)
+struct Slider { cv::RotatedRect r; cv::Point2f top, bottom; float halfw; cv::Mat H; };
+// Dial: printed circle seen as an ellipse; angles are measured on the un-squashed circle
+struct Dial { cv::Point2f c; float rad; cv::RotatedRect e; };
+static inline cv::Point2f slider_uv(const Slider& s, cv::Point2f p){ std::vector<cv::Point2f> a{p},b; cv::perspectiveTransform(a,b,s.H); return b[0]; }
+static inline cv::Point2f dial_unit(const Dial& d, cv::Point2f p){   // point in the dial's circle frame (1 = on the ring)
+  cv::Point2f v=p-d.e.center; float a=-d.e.angle*CV_PI/180.f, c=std::cos(a), s=std::sin(a);
+  cv::Point2f r(v.x*c-v.y*s, v.x*s+v.y*c); return cv::Point2f(r.x/(d.e.size.width/2), r.y/(d.e.size.height/2)); }
 struct Scene { Layout L; std::vector<Slider> sliders; std::vector<Dial> dials; cv::Point2f up{0,-1}; int markers=0; std::vector<cv::Point2f> paper, marker_pts; };
 static inline cv::Point2f right_of(cv::Point2f up){ return cv::Point2f(-up.y,up.x); }   // sheet "right" in image coordinates
 
@@ -83,7 +89,7 @@ static void find_grid(const cv::Mat& gray, const std::vector<std::vector<cv::Poi
   std::vector<cv::Point2f> proj; cv::perspectiveTransform(src,proj,Hg); int good=0; for(size_t i=0;i<proj.size();i++) if(cv::norm(proj[i]-dst[i])<side*0.25) good++;
   if(good<10) return;
   std::vector<cv::Point2f> unit={{0,0},{1,0}}, upt; cv::perspectiveTransform(unit,upt,Hg); float hs=float(side/cv::norm(upt[1]-upt[0])/2);
-  Layout N; N.ok=true;
+  Layout N; N.ok=true; N.direct=(int)qs.size();
   for(int k=0;k<16;k++){ int found=-1; for(size_t i=0;i<qs.size();i++) if(cell[i]==k) found=(int)i;
     if(found>=0) N.quad[k]=qs[found].q; else { int c=k%4,r=k/4; std::vector<cv::Point2f> gg={{c-hs,r-hs},{c+hs,r-hs},{c+hs,r+hs},{c-hs,r+hs}}; cv::perspectiveTransform(gg,N.quad[k],Hg); }
     N.box[k]=cv::boundingRect(N.quad[k]); }
@@ -109,14 +115,23 @@ static void find_panel(const cv::Mat& gray, Scene& S){
     if(lo/std::max(sh,1.f)>2.5f && fill>0.8){ cv::Point2f p[4]; rr.points(p);
       int si=0; float sm=1e9f; for(int k=0;k<4;k++){ float l=cv::norm(p[(k+1)%4]-p[k]); if(l<sm){ sm=l; si=k; } }
       cv::Point2f e1=(p[si]+p[(si+1)%4])*0.5f, e2=(p[(si+2)%4]+p[(si+3)%4])*0.5f;
-      bool e1top=e1.dot(up)>e2.dot(up); sl.push_back({rr, e1top?e1:e2, e1top?e2:e1, sh/2}); }
-    else if(circ>0.8 && A>=minDial && cs[i].size()>=5){ cv::RotatedRect e=cv::fitEllipse(cs[i]); dl.push_back({e.center,(e.size.width+e.size.height)/4}); } }
+      bool e1top=e1.dot(up)>e2.dot(up);
+      // true perspective corners: 4-vertex approximation of the outline (fallback: the rotated rectangle)
+      std::vector<cv::Point> ap; cv::approxPolyDP(cs[i],ap,0.04*per,true); std::vector<cv::Point2f> v4;
+      if(ap.size()==4) for(auto& q:ap) v4.push_back(q); else v4.assign(p,p+4);
+      std::sort(v4.begin(),v4.end(),[&](const cv::Point2f& a,const cv::Point2f& b){ return a.dot(up)<b.dot(up); });   // first two = bottom end
+      cv::Point2f rtv=right_of(up); if(v4[0].dot(rtv)>v4[1].dot(rtv)) std::swap(v4[0],v4[1]); if(v4[2].dot(rtv)>v4[3].dot(rtv)) std::swap(v4[2],v4[3]);
+      std::vector<cv::Point2f> dst={{0,0},{1,0},{0,1},{1,1}};   // bottom-left, bottom-right, top-left, top-right
+      cv::Mat Hs=cv::getPerspectiveTransform(v4,dst);
+      sl.push_back({rr, e1top?e1:e2, e1top?e2:e1, sh/2, Hs}); }
+    else if(circ>0.8 && A>=minDial && cs[i].size()>=5){ cv::RotatedRect e=cv::fitEllipse(cs[i]); dl.push_back({e.center,(e.size.width+e.size.height)/4,e}); } }
   std::sort(sl.begin(),sl.end(),[&](const Slider&a,const Slider&b){ return a.r.center.dot(rt)<b.r.center.dot(rt); });
   std::sort(dl.begin(),dl.end(),[&](const Dial&a,const Dial&b){ return a.c.dot(rt)<b.c.dot(rt); });
   if(sl.size()>=S.sliders.size()) S.sliders=sl;     // keep the previous set while a hand hides part of it
   if(dl.size()>=S.dials.size()) S.dials=dl;
 }
 
+static int g_stable=0;
 static void find_scene(const cv::Mat& gray, Scene& S){
   static cv::aruco::ArucoDetector det(cv::aruco::getPredefinedDictionary(cv::aruco::DICT_4X4_50), cv::aruco::DetectorParameters());
   std::vector<int> ids; std::vector<std::vector<cv::Point2f>> mk, rej; det.detectMarkers(gray,mk,ids,rej);
@@ -127,8 +142,12 @@ static void find_scene(const cv::Mat& gray, Scene& S){
     cv::Point2f u(ax[ax.size()/2],ay[ay.size()/2]); float n=std::sqrt(u.dot(u)); if(n>0.5f) S.up=u*(1.f/n);
     S.markers=(int)mk.size(); S.marker_pts=corners;
   }
-  Layout N; find_grid(gray,rej,S.up,N); if(N.ok) S.L=N;
+  size_t ns=S.sliders.size(), nd=S.dials.size(); bool had=S.L.ok;
+  Layout N; find_grid(gray,rej,S.up,N);
+  if(N.ok && (!S.L.ok || g_stable<3 || N.direct>=14)) S.L=N;     // once locked, only accept a clean (unobstructed) grid
   find_panel(gray,S);
+  bool same=(S.L.ok==had) && S.sliders.size()==ns && S.dials.size()==nd && (S.L.ok||!S.sliders.empty());
+  g_stable= same? g_stable+1 : 0;
   // search region for fingertips: the controls and markers, grown a little (keeps tape/clutter off the sheets out)
   std::vector<cv::Point2f> all=S.marker_pts;
   if(S.L.ok) for(int i=0;i<16;i++) for(auto& q:S.L.quad[i]) all.push_back(q);
@@ -169,7 +188,7 @@ int main(int argc,char** argv){
     Frame f; { std::unique_lock<std::mutex> lk(g_fm); g_fcv.wait(lk,[&]{ return g_stop || g_latest.seq>seen; }); if(g_stop) break; f=g_latest; seen=f.seq; }
     frames++; if(now_s()-fps_t>=1){ fps=frames/(now_s()-fps_t); frames=0; fps_t=now_s(); }
     cv::Mat Y(f.h,f.w,CV_8U,f.buf->data()), gray; cv::resize(Y,gray,cv::Size(f.w/2,f.h/2),0,0,cv::INTER_AREA);
-    if(now_s()-last_find>0.3 || (!S.L.ok && S.sliders.empty() && S.dials.empty())){ last_find=now_s(); find_scene(gray,S); }
+    if(now_s()-last_find>(g_stable>=3?2.0:0.3) || (!S.L.ok && S.sliders.empty() && S.dials.empty())){ last_find=now_s(); find_scene(gray,S); }
     Layout& L=S.L; auto& Psl=S.sliders; auto& Pdl=S.dials;
     if(!L.ok && Psl.empty() && Pdl.empty()){ if(now_s()-t_start>2 && !announced){ fprintf(stderr,"[board] looking for buttons / sliders / dials...\n"); announced=true; } continue; }
     if(!announced || announced==true){ static bool told=false; if(!told){ told=true; fprintf(stderr,"[board] found: %s%d sliders, %d dials (%d markers, sheet up = %.2f,%.2f)\n",L.ok?"16 buttons, ":"",(int)Psl.size(),(int)Pdl.size(),S.markers,S.up.x,S.up.y); } }
@@ -219,10 +238,9 @@ int main(int argc,char** argv){
     // ---- which control is under the fingertip (dial > slider > button) ----
     int on_dial=-1, on_slider=-1, on_button=-1; float slider_v=0;
     if(tip_pt.x>=0){
-      for(size_t k=0;k<Pdl.size() && k<2;k++) if(cv::norm(tip_pt-Pdl[k].c)<=Pdl[k].rad*1.15f){ on_dial=(int)k; break; }
-      if(on_dial<0) for(size_t k=0;k<Psl.size() && k<4;k++){ const Slider& s=Psl[k]; cv::Point2f ax=s.top-s.bottom; float len=std::sqrt(ax.dot(ax)); ax*=1.f/len;
-        cv::Point2f q=tip_pt-s.bottom; float along=q.dot(ax), side=std::fabs(q.x*ax.y-q.y*ax.x);
-        if(along>-0.05f*len && along<1.05f*len && side<s.halfw*1.4f){ on_slider=(int)k; slider_v=std::min(1.f,std::max(0.f,along/len)); break; } }
+      for(size_t k=0;k<Pdl.size() && k<2;k++){ cv::Point2f u=dial_unit(Pdl[k],tip_pt); if(u.dot(u)<=1.15f*1.15f){ on_dial=(int)k; break; } }
+      if(on_dial<0) for(size_t k=0;k<Psl.size() && k<4;k++){ cv::Point2f uv=slider_uv(Psl[k],tip_pt);   // perspective-correct
+        if(uv.x>-0.2f && uv.x<1.2f && uv.y>-0.05f && uv.y<1.05f){ on_slider=(int)k; slider_v=std::min(1.f,std::max(0.f,uv.y)); break; } }
       if(on_dial<0 && on_slider<0 && L.ok) for(int i=0;i<16;i++) if(cv::pointPolygonTest(L.quad[i],tip_pt,false)>=0){ on_button=i; break; } }
 
     // buttons: dwell to press, short grace before release
@@ -244,7 +262,10 @@ int main(int argc,char** argv){
     if(on_dial>=0){ if(on_dial==dial_active) dial_frames++; else if(dial_active<0){ dial_active=on_dial; dial_frames=1; dial_have=false; } dial_last=now_s(); }
     char deck=dial_active==1?'b':'a';
     if(dial_active>=0 && on_dial==dial_active){
-      float raw=std::atan2(tip_pt.y-Pdl[dial_active].c.y,tip_pt.x-Pdl[dial_active].c.x)*180.f/CV_PI;   // clockwise on paper = forward
+      // angle on the sheet: un-squash the ellipse, then measure in sheet axes so clockwise on paper = forward
+      cv::Point2f vu=dial_unit(Pdl[dial_active],tip_pt); float a=-Pdl[dial_active].e.angle*CV_PI/180.f;
+      cv::Point2f vi(vu.x*std::cos(-a)-vu.y*std::sin(-a), vu.x*std::sin(-a)+vu.y*std::cos(-a));   // back to image axes, circle-scaled
+      cv::Point2f rt2=right_of(S.up); float raw=-std::atan2(vi.dot(S.up), vi.dot(rt2))*180.f/CV_PI;   // sheet frame: clockwise = positive = forward
       if(dial_frames==3){ dj("%c.scratch 1",deck); fprintf(stderr,">>> SCRATCH deck %c\n",deck-32); }
       if(!dial_have){ dial_have=true; dial_raw_last=raw; dial_unwrap=0; }
       float dd=raw-dial_raw_last; if(dd>180) dd-=360; if(dd<-180) dd+=360; dial_raw_last=raw; dial_unwrap+=dd; dial_deg[dial_active]+=dd;
