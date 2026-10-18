@@ -221,6 +221,43 @@ def test_both_at_once():
               f"render {st['render_us']:.0f} us of a {1e6 * 256 / 48000:.0f} us budget")
 
 
+def test_priorities():
+    print("\nPriorities")
+    s = socket.create_connection(("127.0.0.1", HTTP))   # hold a phone stream open
+    s.sendall(b"GET /stream HTTP/1.1\r\n\r\n")
+    time.sleep(0.3)
+    st = stats()
+    s.close()
+    check("render thread is real-time", st["realtime"] == 1)
+    check("phone stream thread is real-time", st["clients"] >= 1 and st["rt_streams"] == st["clients"],
+          f"{st['rt_streams']}/{st['clients']} streams at FIFO {st['prio']['stream']}")
+    check("ladder: render > control > stream", st["prio"]["render"] > st["prio"]["control"] > st["prio"]["stream"])
+
+
+def test_empty_deck(exe, t):
+    print("\nEmpty deck B")
+    proc = subprocess.Popen([exe, "-a", f"{t}/testA_120bpm.wav", "-p", str(HTTP + 1), "-u", str(UDP + 1)],
+                            stderr=subprocess.DEVNULL)
+    time.sleep(0.6)
+    try:
+        u = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        for c in ("b.play", "pad 7", "pad 8", "pad 11", "pad 12", "pad 15", "b.scratch 1", "b.platter 90",
+                  "b.scratch 0", "b.filter -1", "pad 4"):
+            u.sendto(c.encode(), ("127.0.0.1", UDP + 1))
+        time.sleep(0.3)
+        raw = urllib.request.urlopen(f"http://127.0.0.1:{HTTP + 1}/stats").read()
+        try:
+            json.loads(raw)
+            ok = b"nan" not in raw.lower() and b"inf" not in raw.lower()
+        except ValueError:
+            ok = False
+        check("stats stay valid JSON with an empty deck", ok)
+        check("engine survives commands to an empty deck", proc.poll() is None)
+    finally:
+        proc.terminate()
+        proc.wait()
+
+
 def main():
     exe = os.path.join(ROOT, "dj_engine")
     t = os.path.join(ROOT, "tracks")
@@ -238,9 +275,11 @@ def main():
         test_deck("b", (3, 4, 7, 8, 11, 12, 15))
         test_samples()
         test_both_at_once()
+        test_priorities()
     finally:
         proc.terminate()
         proc.wait()
+    test_empty_deck(exe, t)
     print(f"\n{'ALL PASSED' if fails == 0 else f'{fails} FAILED'}")
     sys.exit(1 if fails else 0)
 

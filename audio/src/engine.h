@@ -21,6 +21,7 @@ typedef struct {
     int              udp_port;
     int              prio_render;
     int              prio_control;
+    int              prio_stream;
     _Atomic int      running;
 } engine_t;
 

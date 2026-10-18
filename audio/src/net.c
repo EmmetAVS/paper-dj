@@ -37,7 +37,9 @@ void *udp_control_thread(void *arg) {
     fprintf(stderr, "[control] listening for UDP commands on port %d\n", e->udp_port);
 
     char buf[2048];
+    cpu_meter_t meter = {0};
     while (atomic_load(&e->running)) {
+        cpu_meter_tick(&meter, &e->stats.control_cpu_pm);
         ssize_t n = recv(s, buf, sizeof buf - 1, 0);
         if (n <= 0) continue;
         uint64_t t = now_ns();
@@ -120,6 +122,22 @@ static void serve_stream(engine_t *e, int fd) {
     atomic_fetch_sub(&e->stats.clients, 1);
 }
 
+/* Whole-process CPU use since the previous /stats call, per mille of one core. */
+static int process_cpu_pm(void) {
+    static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+    static uint64_t w0, c0;
+    static int last;
+    struct timespec ts;
+    clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &ts);
+    uint64_t c = (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec, w = now_ns();
+    pthread_mutex_lock(&lock);
+    if (w0 && w - w0 > 200000000ull) { last = (int)((c - c0) * 1000 / (w - w0)); w0 = w; c0 = c; }
+    else if (!w0) { w0 = w; c0 = c; }
+    int r = last;
+    pthread_mutex_unlock(&lock);
+    return r;
+}
+
 static void serve_stats(engine_t *e, int fd) {
     mixer_snapshot_t s;
     engine_read_snapshot(e, &s);
@@ -127,12 +145,16 @@ static void serve_stats(engine_t *e, int fd) {
     char b[6144];
     size_t cap = sizeof b;
     int n = snprintf(b, cap,
-        "{\"rate\":%d,\"block_frames\":%d,\"realtime\":%d,\"clients\":%d,"
+        "{\"rate\":%d,\"block_frames\":%d,\"realtime\":%d,\"clients\":%d,\"rt_streams\":%d,"
+        "\"prio\":{\"render\":%d,\"control\":%d,\"stream\":%d},"
+        "\"cpu_pct\":{\"render\":%.1f,\"control\":%.1f,\"process\":%.1f},"
         "\"blocks\":%llu,\"deadline_misses\":%llu,\"max_late_us\":%.1f,"
         "\"render_us\":%.1f,\"render_us_max\":%.1f,"
         "\"cmds\":%llu,\"cmds_dropped\":%llu,\"cmd_lat_us\":%.1f,\"cmd_lat_us_max\":%.1f,"
         "\"xfade\":%.3f,\"master\":%.3f,\"peak\":%.3f,\"quantize\":%d,\"samples\":[",
         OUT_RATE, BLOCK_FRAMES, atomic_load(&st->rt_render), atomic_load(&st->clients),
+        atomic_load(&st->rt_streams), e->prio_render, e->prio_control, e->prio_stream,
+        atomic_load(&st->render_cpu_pm) / 10.0, atomic_load(&st->control_cpu_pm) / 10.0, process_cpu_pm() / 10.0,
         (unsigned long long)atomic_load(&st->blocks), (unsigned long long)atomic_load(&st->deadline_misses),
         atomic_load(&st->max_late_ns) / 1e3, atomic_load(&st->render_ns_last) / 1e3,
         atomic_load(&st->render_ns_max) / 1e3,
@@ -189,7 +211,13 @@ static void *conn_thread(void *arg) {
         } else if (!strcmp(path, "/stream")) {
             if (atomic_load(&e->stats.clients) >= MAX_CLIENTS)
                 reply(c.fd, "503 Service Unavailable", "text/plain", "too many listeners\n", 19);
-            else serve_stream(e, c.fd);
+            else {
+                /* this thread now carries audio to a listener: run it above vision */
+                int rt = set_realtime(e->prio_stream, "stream") == 0;
+                if (rt) atomic_fetch_add(&e->stats.rt_streams, 1);
+                serve_stream(e, c.fd);
+                if (rt) atomic_fetch_sub(&e->stats.rt_streams, 1);
+            }
         } else if (!strncmp(path, "/cmd?c=", 7)) {
             char *q = path + 7;
             char *amp = strchr(q, '&');

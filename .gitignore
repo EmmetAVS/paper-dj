@@ -3,3 +3,6 @@ audio/tracks/*.wav
 *.o
 .DS_Store
 __pycache__/
+vision/vision_skeleton
+vision/libpdj.a
+vision/src/*.o

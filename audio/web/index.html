@@ -92,7 +92,7 @@
   <div class="meter"><small>Pi misses</small><b id="m-miss">–</b></div>
   <div class="meter"><small>cmd → audio</small><b id="m-cmd">–</b></div>
   <div class="meter"><small>render</small><b id="m-render">–</b></div>
-  <div class="meter"><small>RT thread</small><b id="m-rt">–</b></div>
+  <div class="meter"><small>audio priority</small><b id="m-rt">–</b></div>
 </div>
 
 <div class="board">
@@ -346,9 +346,11 @@ async function poll() {
     $("m-miss").textContent = s.deadline_misses;
     $("m-miss").className = s.deadline_misses ? "warn" : "ok";
     $("m-cmd").textContent = s.cmd_lat_us >= 1000 ? (s.cmd_lat_us / 1000).toFixed(1) + " ms" : Math.round(s.cmd_lat_us) + " µs";
-    $("m-render").textContent = Math.round(s.render_us) + " µs";
-    $("m-rt").textContent = s.realtime ? "FIFO" : "normal";
-    $("m-rt").className = s.realtime ? "ok" : "warn";
+    $("m-render").textContent = Math.round(s.render_us) + " µs · " + s.cpu_pct.render.toFixed(1) + "%";
+    // audio is protected only if the renderer AND every phone stream got real-time priority
+    const allRt = s.realtime && s.rt_streams === s.clients;
+    $("m-rt").textContent = allRt ? `FIFO ${s.prio.render}/${s.prio.stream}` : "normal";
+    $("m-rt").className = allRt ? "ok" : "warn";
     $("quant").textContent = "Quantize: " + (s.quantize ? "on" : "off");
     quant = !!s.quantize;
 

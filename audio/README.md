@@ -17,6 +17,11 @@ phone test board ─HTTP /cmd─┤
         HTTP :8080 /stream ──Wi-Fi/hotspot──► phone browser (jitter buffer → speaker / BT headphones)
 ```
 
+Priorities: render 50, command
+receiver 45, phone streams 40 (all FIFO). They sit above the vision process (32 and a sporadic
+28→8), so heavy vision work can never starve the audio. The full ladder is in
+[`../vision/README.md`](../vision/README.md).
+
 The render thread never blocks, allocates or takes a lock. Commands are parsed on the
 control thread (SCHED_FIFO 45) and applied at the start of the next 256-frame block.
 A slow or disconnected phone only affects its own stream thread.
@@ -92,7 +97,7 @@ Options:
 - `-p`: HTTP port (default 8080)
 - `-u`: UDP port (default 9000)
 - `-w`: path to the phone page
-- `-R` / `-C`: render and control priorities (defaults 50 / 45)
+- `-R` / `-C` / `-S`: render, control and phone-stream priorities (defaults 50 / 45 / 40)
 
 ## Full command reference
 
@@ -134,13 +139,16 @@ make && python3 tools/make_test_tracks.py && python3 tests/feature_test.py
 
 The test drives every pad and slider on **both decks** over UDP, exactly as vision will. It checks
 the engine state and the real audio stream, and it also runs both songs together. Current result:
-all 65 checks pass, including under thread- and address-sanitizer builds.
+all 70 checks pass (including real-time priority of the phone stream and an empty-deck case), including under thread- and address-sanitizer builds.
 
 ## Stats (the QNX evidence)
 
 `GET /stats` (also shown live on the phone page) includes:
 
 - `realtime`: whether the render thread got SCHED_FIFO
+- `rt_streams` / `clients`: how many phone stream threads got SCHED_FIFO (should be equal)
+- `prio`: the configured render / control / stream priorities
+- `cpu_pct`: CPU use of the render thread, the control thread and the whole engine (% of one core)
 - `deadline_misses`: blocks where the render thread woke more than one block (5.33 ms) late. On QNX this should stay **0**.
 - `max_late_us`, `render_us`, `render_us_max`: wake-up lateness and per-block render time
 - `cmd_lat_us`, `cmd_lat_us_max`: time from a command arriving to it being applied to the audio

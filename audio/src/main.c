@@ -73,6 +73,7 @@ static void *render_thread(void *arg) {
     atomic_store(&e->stats.rt_render, set_realtime(e->prio_render, "render") == 0);
 
     int16_t block[BLOCK_FRAMES * 2];
+    cpu_meter_t meter = {0};
     float peak_hold = 0.0f;
     uint64_t start = now_ns(), blocks = 0;
 
@@ -112,6 +113,7 @@ static void *render_thread(void *arg) {
         atomic_max_u64(&e->stats.render_ns_max, dt);
         atomic_store(&e->stats.blocks, ++blocks);
         if ((blocks & 7) == 0) publish_snapshot(e, peak_hold);
+        if ((blocks & 63) == 0) cpu_meter_tick(&meter, &e->stats.render_cpu_pm);
     }
     return NULL;
 }
@@ -144,8 +146,8 @@ static void usage(const char *argv0) {
     fprintf(stderr,
         "usage: %s [-a deckA.wav] [-b deckB.wav] [-1 sample1.wav] [-2 sample2.wav]\n"
         "          [-A bpmA] [-B bpmB] [-p http_port] [-u udp_port]\n"
-        "          [-w web/index.html] [-R render_prio] [-C control_prio]\n"
-        "defaults: -p 8080 -u 9000 -w web/index.html -R 50 -C 45; BPM is auto-detected\n", argv0);
+        "          [-w web/index.html] [-R render_prio] [-C control_prio] [-S stream_prio]\n"
+        "defaults: -p 8080 -u 9000 -w web/index.html -R 50 -C 45 -S 40; BPM is auto-detected\n", argv0);
 }
 
 static int load_wav(track_t *t, char *name, size_t namelen, const char *path) {
@@ -168,13 +170,14 @@ int main(int argc, char **argv) {
     e->udp_port = 9000;
     e->prio_render = 50;     /* below 64 so it works as a non-root user on QNX */
     e->prio_control = 45;
+    e->prio_stream = 40;     /* sending audio to phones outranks vision (32 and below) */
     const char *paths[NDECKS] = { NULL, NULL };
     const char *samples[NSAMPLES] = { NULL, NULL };
     double bpm_override[NDECKS] = { 0, 0 };
     const char *web = "web/index.html";
 
     int opt;
-    while ((opt = getopt(argc, argv, "a:b:1:2:A:B:p:u:w:R:C:h")) != -1) {
+    while ((opt = getopt(argc, argv, "a:b:1:2:A:B:p:u:w:R:C:S:h")) != -1) {
         switch (opt) {
         case 'a': paths[0] = optarg; break;
         case 'b': paths[1] = optarg; break;
@@ -187,6 +190,7 @@ int main(int argc, char **argv) {
         case 'w': web = optarg; break;
         case 'R': e->prio_render = atoi(optarg); break;
         case 'C': e->prio_control = atoi(optarg); break;
+        case 'S': e->prio_stream = atoi(optarg); break;
         default: usage(argv[0]); return opt == 'h' ? 0 : 1;
         }
     }

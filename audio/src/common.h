@@ -19,6 +19,23 @@ static inline uint64_t now_ns(void) {
     return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
 }
 
+/* CPU time consumed by the calling thread. */
+static inline uint64_t thread_cpu_ns(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts);
+    return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+}
+
+/* Tracks a thread's CPU share over ~1 s windows, written as per mille. */
+typedef struct { uint64_t wall0, cpu0; } cpu_meter_t;
+static inline void cpu_meter_tick(cpu_meter_t *m, _Atomic int *out) {
+    uint64_t w = now_ns(), c = thread_cpu_ns();
+    if (m->wall0 == 0) { m->wall0 = w; m->cpu0 = c; return; }
+    if (w - m->wall0 < 1000000000ull) return;
+    atomic_store(out, (int)((c - m->cpu0) * 1000 / (w - m->wall0)));
+    m->wall0 = w; m->cpu0 = c;
+}
+
 static inline float clampf(float x, float lo, float hi) {
     return x < lo ? lo : (x > hi ? hi : x);
 }
@@ -105,6 +122,9 @@ typedef struct {
     _Atomic uint64_t cmd_lat_ns_max;
     _Atomic int      clients;
     _Atomic int      rt_render;         /* 1 if render thread got SCHED_FIFO */
+    _Atomic int      rt_streams;        /* phone stream threads running SCHED_FIFO */
+    _Atomic int      render_cpu_pm;     /* render thread CPU use, per mille of one core */
+    _Atomic int      control_cpu_pm;    /* control thread CPU use, per mille of one core */
 } stats_t;
 
 static inline void atomic_max_u64(_Atomic uint64_t *a, uint64_t v) {

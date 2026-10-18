@@ -33,7 +33,8 @@ static const char *param_names[NPARAM] = { "vol", "low", "mid", "high", "rate", 
 /* ---- beat-grid helpers --------------------------------------------------- */
 
 static double beat_frames(const deck_t *d) {
-    return d->bpm > 0 ? d->track.rate * 60.0 / d->bpm : d->track.rate * 0.5;  /* fallback: 120 BPM */
+    double rate = d->track.rate > 0 ? d->track.rate : OUT_RATE;   /* empty deck: avoid 0/0 */
+    return d->bpm > 0 ? rate * 60.0 / d->bpm : rate * 0.5;          /* fallback: 120 BPM */
 }
 static double speed(const deck_t *d) { return d->cur[P_RATE] + d->cur[P_NUDGE] + d->sync_adj; }
 static double eff_bpm(const deck_t *d) { return (d->bpm > 0 ? d->bpm : 120.0) * speed(d); }

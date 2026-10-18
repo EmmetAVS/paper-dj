@@ -10,12 +10,18 @@ paper board ──camera──► vision (QNX, ONNX hand tracking) ──UDP─�
 
 | Folder | What it is | Status |
 |---|---|---|
-| [`audio/`](audio/) | Two-deck real-time mixing engine + phone player / test board | working, 65/65 tests |
-| `vision/` | Board registration + hand tracking → `pad <n>` / slider commands | next |
+| [`audio/`](audio/) | Two-deck real-time mixing engine + phone player / test board | working, 70/70 tests |
+| [`vision/`](vision/) | Priority helpers, engine link, two-thread pipeline skeleton (camera, pad check and hand model still fake) | skeleton running |
 
 ## The board
 
 - **16 pads**: 1–4 play/cue for A and B · 5–8 hot cues 1–2 for A and B · 9–12 loop/sync for A and B · 13 FX A · 14 sample 1 · 15 FX B · 16 sample 2
 - **Each hand** (left = deck A, right = deck B): up/down = volume, rotate = scratch, left/right = filter
 
-Start with [`audio/README.md`](audio/README.md).
+## Priorities (QNX)
+
+| 50 | 45 | 40 | 32 | 28 → 8 | 10 |
+|---|---|---|---|---|---|
+| audio render | commands in | phone streams | camera + pads | hand model (sporadic) | everything else |
+
+Start with [`audio/README.md`](audio/README.md), then [`vision/README.md`](vision/README.md).
