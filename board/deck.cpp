@@ -164,9 +164,10 @@ static void dj(const char* fmt,...){ if(g_udp<0) return; char b[256]; va_list ap
   sendto(g_udp,b,n,0,(sockaddr*)&g_dst,sizeof g_dst); }
 
 int main(int argc,char** argv){
-  std::string djaddr="127.0.0.1:9000"; double dwell_ms=250, release_s=0.3, skin_th=10, skin_ymin=70, skin_grow=1.3; int skin_min=60;
+  std::string djaddr="127.0.0.1:9000"; double dwell_ms=250, release_s=0.3, skin_th=10, skin_ymin=70, skin_grow=1.3; int skin_min=60; double tip_back=0.25; int dial_engage=6;
   for(int i=1;i<argc;i++){ std::string a=argv[i]; auto next=[&]{ if(i+1>=argc){ fprintf(stderr,"missing value for %s\n",a.c_str()); exit(2);} return std::string(argv[++i]); };
     if(a=="--dj") djaddr=next(); else if(a=="--dwell") dwell_ms=atof(next().c_str()); else if(a=="--release") release_s=atof(next().c_str());
+    else if(a=="--tip-back") tip_back=atof(next().c_str()); else if(a=="--dial-frames") dial_engage=atoi(next().c_str());
     else if(a=="--skin-th") skin_th=atof(next().c_str()); else if(a=="--skin-ymin") skin_ymin=atof(next().c_str());
     else { fprintf(stderr,"usage: deck [--dj host:port|off] [--dwell 250] [--release 0.3] [--skin-th 8] [--skin-ymin 40]\n"); return 2; } }
   signal(SIGINT,on_sig); signal(SIGTERM,on_sig);
@@ -224,16 +225,18 @@ int main(int argc,char** argv){
     cv::morphologyEx(mask,mask,cv::MORPH_OPEN,cv::getStructuringElement(cv::MORPH_ELLIPSE,cv::Size(5,5)));
     cv::Mat lab,stats,cents; int nl=cv::connectedComponentsWithStats(mask,lab,stats,cents,8,CV_32S);
     std::vector<int> over(nl,0); for(int y=rb.y;y<rb.y+rb.height;y++){ const int* r=lab.ptr<int>(y); const uint8_t* g=gm.ptr<uint8_t>(y); for(int x=rb.x;x<rb.x+rb.width;x++) if(r[x] && g[x]) over[r[x]]++; }
-    int best=-1, bo=0; for(int k=1;k<nl;k++) if(over[k]>bo){ bo=over[k]; best=k; }
+    // Leading fingertip only: of the skin patches lying on the controls, take the point reaching furthest up the sheet
+    // (when you point, the index finger leads; other fingertips and stray marks are ignored).
+    int best=-1, bo=0; float lead=-1e9f; cv::Point2f lead_pt(-1,-1);
+    for(int k=1;k<nl;k++){ if(over[k]<15 || stats.at<int>(k,cv::CC_STAT_AREA)<20) continue;
+      cv::Rect bb(stats.at<int>(k,0),stats.at<int>(k,1),stats.at<int>(k,2),stats.at<int>(k,3));
+      for(int y=bb.y;y<bb.y+bb.height;y++){ const int* r=lab.ptr<int>(y); for(int x=bb.x;x<bb.x+bb.width;x++) if(r[x]==k){ float t=x*S.up.x+y*S.up.y; if(t>lead){ lead=t; lead_pt=cv::Point2f(x,y); best=k; } } } }
+    if(best>0) bo=over[best];
     tip_pt=cv::Point2f(-1,-1);
-    if(best>0 && stats.at<int>(best,cv::CC_STAT_AREA)>=skin_min){
-      std::vector<cv::Point2f> Pp; cv::Rect bb(stats.at<int>(best,0),stats.at<int>(best,1),stats.at<int>(best,2),stats.at<int>(best,3));
-      for(int y=bb.y;y<bb.y+bb.height;y++){ const int* r=lab.ptr<int>(y); for(int x=bb.x;x<bb.x+bb.width;x++) if(r[x]==best) Pp.push_back(cv::Point2f(x,y)); }
-      cv::Mat data((int)Pp.size(),2,CV_32F,Pp.data()); cv::PCA pca(data,cv::Mat(),cv::PCA::DATA_AS_ROW);
-      cv::Point2f m(pca.mean.at<float>(0),pca.mean.at<float>(1)), ax(pca.eigenvectors.at<float>(0,0),pca.eigenvectors.at<float>(0,1));
-      if(ax.dot(S.up)<0) ax=-ax;     // you reach in from the sheet's bottom edge, so the fingertip is the end pointing sheet-up
-      float bp=-1e9f; cv::Point2f far; for(auto& q:Pp){ float t=(q-m).dot(ax); if(t>bp){ bp=t; far=q; } }
-      tip_pt=far-ax*3.0f;            // on the pad of the finger
+    if(best>0){
+      // the skin edge seen is the front of the fingertip; the pad touching the paper sits about a quarter button behind it
+      float pitch=20.f; if(L.ok){ double a=0; for(int i=0;i<16;i++) a+=cv::contourArea(L.quad[i]); pitch=(float)std::sqrt(a/16); }
+      tip_pt=lead_pt-S.up*(tip_back*pitch);
     }
 
     // ---- which control is under the fingertip (dial > slider > button) ----
@@ -267,19 +270,19 @@ int main(int argc,char** argv){
       cv::Point2f vu=dial_unit(Pdl[dial_active],tip_pt); float a=-Pdl[dial_active].e.angle*CV_PI/180.f;
       cv::Point2f vi(vu.x*std::cos(-a)-vu.y*std::sin(-a), vu.x*std::sin(-a)+vu.y*std::cos(-a));   // back to image axes, circle-scaled
       cv::Point2f rt2=right_of(S.up); float raw=-std::atan2(vi.dot(S.up), vi.dot(rt2))*180.f/CV_PI;   // sheet frame: clockwise = positive = forward
-      if(dial_frames==3){ dj("%c.scratch 1",deck); fprintf(stderr,">>> SCRATCH deck %c\n",deck-32); }
+      if(dial_frames==dial_engage){ dj("%c.scratch 1",deck); fprintf(stderr,">>> SCRATCH deck %c\n",deck-32); }
       if(!dial_have){ dial_have=true; dial_raw_last=raw; dial_unwrap=0; }
       float dd=raw-dial_raw_last; if(dd>180) dd-=360; if(dd<-180) dd+=360; dial_raw_last=raw; dial_unwrap+=dd; dial_deg[dial_active]+=dd;
-      if(dial_frames>=3) dj("%c.platter %.1f",deck,dial_unwrap);
-    } else if(dial_active>=0 && now_s()-dial_last>0.25){ if(dial_frames>=3){ dj("%c.scratch 0",deck); fprintf(stderr,"<<< scratch released deck %c\n",deck-32); } dial_active=-1; dial_frames=0; }
+      if(dial_frames>=dial_engage) dj("%c.platter %.1f",deck,dial_unwrap);
+    } else if(dial_active>=0 && now_s()-dial_last>0.25){ if(dial_frames>=dial_engage){ dj("%c.scratch 0",deck); fprintf(stderr,"<<< scratch released deck %c\n",deck-32); } dial_active=-1; dial_frames=0; }
 
     // ---- JSON for the page ----
     unsigned hands=0; if(on_button>=0) hands|=1u<<on_button;
-    int state=pressed*1000+sl_active*100+(dial_active>=0 && dial_frames>=3? dial_active:9)*10;
+    int state=pressed*1000+sl_active*100+(dial_active>=0 && dial_frames>=dial_engage? dial_active:9)*10;
     if(state!=last_emit_state || hands!=prev_hands || (sl_active>=0 && now_s()-last_emit>0.05) || (dial_active>=0 && now_s()-last_emit>0.05) || now_s()-last_emit>1.0){
       last_emit_state=state; prev_hands=hands; last_emit=now_s();
       printf("{\"t\":%.2f,\"pressed\":%d,\"tip\":%d,\"pinch\":%s,\"fader\":%d,\"faders\":[%.3f,%.3f,%.3f,%.3f],\"scratch\":%d,\"dials\":[%.1f,%.1f],\"sliders\":%d,\"ndials\":%d,\"latency_ms\":%.0f,\"cam_fps\":%.1f,\"hands\":[%s]}\n",
-        now_s()-t_start,pressed+1,on_button+1,sl_active>=0?"true":"false",sl_active+1,fv[0],fv[1],fv[2],fv[3],(dial_active>=0&&dial_frames>=3)?dial_active+1:0,dial_deg[0],dial_deg[1],
+        now_s()-t_start,pressed+1,on_button+1,sl_active>=0?"true":"false",sl_active+1,fv[0],fv[1],fv[2],fv[3],(dial_active>=0&&dial_frames>=dial_engage)?dial_active+1:0,dial_deg[0],dial_deg[1],
         (int)Psl.size(),(int)Pdl.size(),(mono_us()-f.ts)/1000.0,fps,on_button>=0?std::to_string(on_button+1).c_str():"");
       fflush(stdout); }
 
@@ -299,6 +302,6 @@ int main(int argc,char** argv){
       std::string fn= auto_dbg? "debug_"+std::to_string(auto_n++%20)+".png" : std::string("debug.png");
       cv::imwrite(fn,dbg); if(!auto_dbg) fprintf(stderr,"[debug] wrote debug.png\n"); }
   }
-  if(dial_active>=0 && dial_frames>=3) dj("%c.scratch 0",dial_active==1?'b':'a');
+  if(dial_active>=0 && dial_frames>=dial_engage) dj("%c.scratch 0",dial_active==1?'b':'a');
   camera_stop_viewfinder(h); camera_close(h); return 0;
 }
