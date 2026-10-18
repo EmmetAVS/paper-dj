@@ -1,4 +1,9 @@
-/* Sends board commands from the vision process to dj_engine over UDP.
+/* Sends board commands from the vision process to dj_engine.
+ *
+ * Transport: on QNX it writes to /dev/paperdj, the engine's resource manager,
+ * so each command is a QNX message handled at the sender's priority. If that
+ * file isn't there (engine not root, or not QNX) it sends UDP to host:port.
+ * Set PDJ_DEV=<path> to use another path, or PDJ_DEV= (empty) to force UDP.
  *
  * Two message tiers, matching what a listener can hear:
  *  - Triggers (pads, scratch on/off) go out immediately, in order.
@@ -20,6 +25,7 @@ typedef struct pdj_link pdj_link_t;
 
 pdj_link_t *pdj_link_open(const char *host, int port);   /* NULL on failure */
 void        pdj_link_close(pdj_link_t *l);
+const char *pdj_link_transport(pdj_link_t *l);           /* "/dev/paperdj" or "udp" */
 
 /* Triggers: sent now. */
 int  pdj_pad(pdj_link_t *l, int pad);                     /* pad 1..16 */
@@ -40,7 +46,7 @@ int  pdj_tick(pdj_link_t *l);
 int  pdj_flush(pdj_link_t *l);
 
 typedef struct {
-    uint64_t packets;        /* UDP packets sent */
+    uint64_t packets;        /* messages sent (device writes or UDP packets) */
     uint64_t triggers;       /* immediate commands */
     uint64_t updates;        /* pdj_set calls */
     uint64_t values_sent;    /* slider values that actually went out */

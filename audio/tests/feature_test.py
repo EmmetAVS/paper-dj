@@ -305,6 +305,9 @@ def main():
         test_samples()
         test_both_at_once()
         test_priorities()
+        via = stats().get("via", {})
+        check("commands are counted by where they came from", via.get("udp", 0) > 0 and via.get("http", -1) == 0,
+              str(via))
     finally:
         proc.terminate()
         proc.wait()

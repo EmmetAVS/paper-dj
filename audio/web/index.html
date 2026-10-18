@@ -21,10 +21,12 @@
   #start { width: 100%; padding: 18px; font-size: 17px; font-weight: 650; border: 0; border-radius: 12px;
            background: var(--text); color: var(--bg); }
   #start.on { background: var(--panel); color: var(--good); border: 1px solid var(--line); padding: 10px; font-size: 14px; }
-  .meters { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; margin: 10px 0; }
+  .meters { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin: 10px 0; }
   .meter { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; min-width: 0; }
   .meter b { display: block; font-size: 15px; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .meter small { color: var(--dim); font-size: 11px; white-space: nowrap; }
+  @keyframes flash { from { text-shadow: 0 0 10px currentColor; transform: scale(1.15); } to { text-shadow: none; transform: none; } }
+  .meter b.flash { animation: flash .5s ease-out; }
   .ok { color: var(--good); } .warn { color: var(--bad); }
 
   .board { display: grid; grid-template-columns: 1fr minmax(0, 1.25fr) 1fr; gap: 10px; align-items: start; }
@@ -77,7 +79,7 @@
   @media (max-width: 640px) {
     .board { grid-template-columns: 1fr 1fr; }
     .pads-wrap { grid-column: 1 / -1; order: -1; }
-    .meters { grid-template-columns: repeat(3, 1fr); }
+    .meters { grid-template-columns: repeat(2, 1fr); }
     .jog { width: 116px; height: 116px; } .jog .mark { transform-origin: 2px 52px; }
   }
 </style>
@@ -93,6 +95,8 @@
   <div class="meter"><small>cmd → audio</small><b id="m-cmd">–</b></div>
   <div class="meter"><small>render</small><b id="m-render">–</b></div>
   <div class="meter"><small>audio priority</small><b id="m-rt">–</b></div>
+  <div class="meter" title="commands written to the QNX resource manager (vision, shell)"><small>via /dev/paperdj</small><b id="m-dev">–</b></div>
+  <div class="meter" title="commands from this page / UDP port 9000"><small>via web · UDP</small><b id="m-net">–</b></div>
 </div>
 
 <div class="board">
@@ -336,6 +340,7 @@ tgt.addEventListener("input", () => { targetMs = +tgt.value; tgtOut.textContent 
 tgtOut.textContent = tgt.value + "ms";
 
 /* ============================== live state ============================== */
+let lastDev = null;
 async function poll() {
   $("m-buf").textContent = ctx ? Math.round(buffered() / 48) + " ms" : "–";
   $("m-under").textContent = underruns + (skips ? "/" + skips : "");
@@ -351,6 +356,15 @@ async function poll() {
     const allRt = s.realtime && s.rt_streams === s.clients;
     $("m-rt").textContent = allRt ? `FIFO ${s.prio.render}/${s.prio.stream}` : "normal";
     $("m-rt").className = allRt ? "ok" : "warn";
+    if (s.via) {
+      if (s.via.dev !== lastDev && lastDev !== null) {   // flash when new commands arrive through the resmgr
+        $("m-dev").classList.remove("flash"); void $("m-dev").offsetWidth; $("m-dev").classList.add("flash");
+      }
+      lastDev = s.via.dev;
+      $("m-dev").textContent = s.via.dev;
+      $("m-dev").classList.toggle("ok", s.via.dev > 0);
+      $("m-net").textContent = s.via.http + " · " + s.via.udp;
+    }
     $("quant").textContent = "Quantize: " + (s.quantize ? "on" : "off");
     quant = !!s.quantize;
 

@@ -258,8 +258,12 @@ int main(int argc, char **argv) {
     pthread_create(&th_model, NULL, model_thread, NULL);
     pthread_create(&th_cap, NULL, capture_thread, NULL);
 
-    fprintf(stderr, "[vision] %d fps, fake model %.0f ms/frame, sending to %s:%d\n",
-            cfg.fps, cfg.model_ms, cfg.host, cfg.port);
+    if (strcmp(pdj_link_transport(link_), "udp") == 0)
+        fprintf(stderr, "[vision] %d fps, fake model %.0f ms/frame, sending UDP to %s:%d\n",
+                cfg.fps, cfg.model_ms, cfg.host, cfg.port);
+    else
+        fprintf(stderr, "[vision] %d fps, fake model %.0f ms/frame, writing to %s\n",
+                cfg.fps, cfg.model_ms, pdj_link_transport(link_));
     uint64_t last_cap = 0, last_mod = 0;
     for (int sec = 1; atomic_load(&running); sec++) {
         sleep(1);
@@ -268,7 +272,7 @@ int main(int argc, char **argv) {
         pdj_link_stats(link_, &ls);
         fprintf(stderr,
             "[vision] capture %3llu fps | model %3llu fps | dropped %llu | latency avg %.1f ms max %.1f ms | "
-            "pads %llu | sent %llu pkts (%llu of %llu slider updates) | cpu capture %.0f ms model %.0f ms\n",
+            "pads %llu | sent %llu msgs (%llu of %llu slider updates) | cpu capture %.0f ms model %.0f ms\n",
             (unsigned long long)(cap - last_cap), (unsigned long long)(mod - last_mod),
             (unsigned long long)atomic_load(&n_dropped),
             mod ? atomic_load(&lat_sum_us) / 1000.0 / mod : 0.0, atomic_load(&lat_max_us) / 1000.0,

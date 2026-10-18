@@ -44,7 +44,7 @@ void *udp_control_thread(void *arg) {
         if (n <= 0) continue;
         uint64_t t = now_ns();
         buf[n] = 0;
-        engine_submit_text(e, buf, t);
+        atomic_fetch_add(&e->stats.via_udp, (uint64_t)engine_submit_text(e, buf, t));
     }
     close(s);
     return NULL;
@@ -151,6 +151,7 @@ static void serve_stats(engine_t *e, int fd) {
         "\"blocks\":%llu,\"deadline_misses\":%llu,\"max_late_us\":%.1f,"
         "\"render_us\":%.1f,\"render_us_max\":%.1f,"
         "\"cmds\":%llu,\"cmds_dropped\":%llu,\"cmd_lat_us\":%.1f,\"cmd_lat_us_max\":%.1f,"
+        "\"via\":{\"dev\":%llu,\"udp\":%llu,\"http\":%llu},"
         "\"xfade\":%.3f,\"master\":%.3f,\"peak\":%.3f,\"quantize\":%d,\"samples\":[",
         OUT_RATE, BLOCK_FRAMES, atomic_load(&st->rt_render), atomic_load(&st->clients),
         atomic_load(&st->rt_streams), e->prio_render, e->prio_control, e->prio_stream,
@@ -160,6 +161,8 @@ static void serve_stats(engine_t *e, int fd) {
         atomic_load(&st->render_ns_max) / 1e3,
         (unsigned long long)atomic_load(&st->cmds_applied), (unsigned long long)atomic_load(&st->cmds_dropped),
         atomic_load(&st->cmd_lat_ns_last) / 1e3, atomic_load(&st->cmd_lat_ns_max) / 1e3,
+        (unsigned long long)atomic_load(&st->via_dev), (unsigned long long)atomic_load(&st->via_udp),
+        (unsigned long long)atomic_load(&st->via_http),
         s.xfade, s.master, s.peak, s.quantize);
     for (int k = 0; k < NSAMPLES; k++)
         n += snprintf(b + n, cap - (size_t)n, "%s{\"name\":\"%s\",\"playing\":%d,\"vol\":%.2f}",
@@ -224,6 +227,7 @@ static void *conn_thread(void *arg) {
             if (amp) *amp = 0;
             url_decode(q);
             int ok = engine_submit_text(e, q, t);
+            atomic_fetch_add(&e->stats.via_http, (uint64_t)ok);
             reply(c.fd, ok ? "204 No Content" : "400 Bad Request", "text/plain", "", 0);
         } else if (!strcmp(path, "/stats")) {
             serve_stats(e, c.fd);

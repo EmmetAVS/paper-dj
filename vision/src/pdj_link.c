@@ -1,6 +1,8 @@
 #include "pdj_link.h"
 
 #include <arpa/inet.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <math.h>
 #include <netdb.h>
 #include <netinet/in.h>
@@ -26,7 +28,9 @@ typedef struct {
 } slot_t;
 
 struct pdj_link {
-    int              fd;
+    int              fd;           /* UDP socket: fallback when the device isn't there */
+    int              dev_fd;       /* /dev/paperdj, or -1 */
+    char             dev_path[64];
     struct sockaddr_in addr;
     pthread_mutex_t  lock;
     slot_t           slots[MAX_KEYS];
@@ -41,16 +45,27 @@ static uint64_t now_ns(void) {
     return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
 }
 
+/* The engine's resource manager. PDJ_DEV overrides the path; PDJ_DEV= (empty) forces UDP. */
+static void open_device(pdj_link_t *l) {
+    const char *env = getenv("PDJ_DEV");
+    snprintf(l->dev_path, sizeof l->dev_path, "%s", env ? env : "/dev/paperdj");
+    l->dev_fd = l->dev_path[0] ? open(l->dev_path, O_WRONLY) : -1;
+}
+
 pdj_link_t *pdj_link_open(const char *host, int port) {
     pdj_link_t *l = calloc(1, sizeof *l);
     if (!l) return NULL;
+    open_device(l);
     l->fd = socket(AF_INET, SOCK_DGRAM, 0);
     l->addr.sin_family = AF_INET;
     l->addr.sin_port = htons((uint16_t)port);
     if (l->fd < 0 || inet_pton(AF_INET, host, &l->addr.sin_addr) != 1) {
         struct hostent *h = gethostbyname(host);
-        if (l->fd < 0 || !h) { if (l->fd >= 0) close(l->fd); free(l); return NULL; }
-        memcpy(&l->addr.sin_addr, h->h_addr_list[0], sizeof l->addr.sin_addr);
+        if (l->fd < 0 || !h) {
+            if (l->fd >= 0) close(l->fd);
+            if (l->dev_fd < 0) { free(l); return NULL; }   /* neither transport works */
+            l->fd = -1;                                     /* device only */
+        } else memcpy(&l->addr.sin_addr, h->h_addr_list[0], sizeof l->addr.sin_addr);
     }
     /* priority inheritance: if the low-priority model thread holds the lock,
      * the capture thread waiting on it boosts it instead of being blocked */
@@ -65,16 +80,32 @@ pdj_link_t *pdj_link_open(const char *host, int port) {
 void pdj_link_close(pdj_link_t *l) {
     if (!l) return;
     pdj_flush(l);
-    close(l->fd);
+    if (l->fd >= 0) close(l->fd);
+    if (l->dev_fd >= 0) close(l->dev_fd);
     pthread_mutex_destroy(&l->lock);
     free(l);
 }
 
+/* One write() = one QNX message to the engine, handled at this thread's priority. */
 static int send_packet(pdj_link_t *l, const char *buf, size_t n) {
     if (n == 0) return 0;
-    ssize_t r = sendto(l->fd, buf, n, 0, (struct sockaddr *)&l->addr, sizeof l->addr);
     l->stats.packets++;
+    if (l->dev_fd >= 0) {
+        if (write(l->dev_fd, buf, n) == (ssize_t)n) return 0;
+        if (errno == EINVAL) return -1;          /* the engine rejected the command itself */
+        close(l->dev_fd);                        /* engine restarted? reopen once */
+        l->dev_fd = open(l->dev_path, O_WRONLY);
+        if (l->dev_fd >= 0 && write(l->dev_fd, buf, n) == (ssize_t)n) return 0;
+        if (l->dev_fd >= 0) { close(l->dev_fd); l->dev_fd = -1; }
+        fprintf(stderr, "[pdj_link] %s unavailable, falling back to UDP\n", l->dev_path);
+    }
+    if (l->fd < 0) return -1;
+    ssize_t r = sendto(l->fd, buf, n, 0, (struct sockaddr *)&l->addr, sizeof l->addr);
     return r < 0 ? -1 : 0;
+}
+
+const char *pdj_link_transport(pdj_link_t *l) {
+    return l->dev_fd >= 0 ? l->dev_path : "udp";
 }
 
 /* lock held */

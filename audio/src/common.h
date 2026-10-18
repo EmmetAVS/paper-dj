@@ -120,6 +120,9 @@ typedef struct {
     _Atomic uint64_t cmds_dropped;
     _Atomic uint64_t cmd_lat_ns_last;   /* arrival -> applied in a block */
     _Atomic uint64_t cmd_lat_ns_max;
+    _Atomic uint64_t via_dev;           /* commands accepted from /dev/paperdj */
+    _Atomic uint64_t via_udp;           /* ... from UDP port 9000 */
+    _Atomic uint64_t via_http;          /* ... from the web page (/cmd) */
     _Atomic int      clients;
     _Atomic int      rt_render;         /* 1 if render thread got SCHED_FIFO */
     _Atomic int      rt_streams;        /* phone stream threads running SCHED_FIFO */

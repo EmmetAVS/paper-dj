@@ -46,7 +46,10 @@ static int status_text(char *b, size_t cap) {
             s.fx_on[i] ? "  FX" : "", s.scratching[i] ? "  SCRATCH" : "");
     }
     if (n < (int)cap)
-        n += snprintf(b + n, cap - (size_t)n, "crossfader %.2f   master %.2f\n", s.xfade, s.master);
+        n += snprintf(b + n, cap - (size_t)n,
+            "crossfader %.2f   master %.2f   commands via /dev/paperdj %llu, UDP %llu, web %llu\n",
+            s.xfade, s.master, (unsigned long long)atomic_load(&st->via_dev),
+            (unsigned long long)atomic_load(&st->via_udp), (unsigned long long)atomic_load(&st->via_http));
     return n < (int)cap ? n : (int)cap - 1;
 }
 
@@ -61,7 +64,9 @@ static int pdj_write(resmgr_context_t *ctp, io_write_t *msg, RESMGR_OCB_T *ocb) 
     ssize_t got = resmgr_msgget(ctp, buf, take, sizeof msg->i);
     if (got < 0) return errno;
     buf[got] = 0;
-    if (!engine_submit_text(g_e, buf, now_ns())) return EINVAL;  /* nothing parsed: tell the writer */
+    int ok = engine_submit_text(g_e, buf, now_ns());
+    if (!ok) return EINVAL;                                     /* nothing parsed: tell the writer */
+    atomic_fetch_add(&g_e->stats.via_dev, (uint64_t)ok);
 
     _IO_SET_WRITE_NBYTES(ctp, n);
     ocb->attr->flags |= IOFUNC_ATTR_MTIME | IOFUNC_ATTR_CTIME;
