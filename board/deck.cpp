@@ -147,7 +147,8 @@ static void find_scene(const cv::Mat& gray, Scene& S){
   if(N.ok && (!S.L.ok || g_stable<3 || N.direct>=14)) S.L=N;     // once locked, only accept a clean (unobstructed) grid
   find_panel(gray,S);
   bool same=(S.L.ok==had) && S.sliders.size()==ns && S.dials.size()==nd && (S.L.ok||!S.sliders.empty());
-  g_stable= same? g_stable+1 : 0;
+  static bool oriented=false; if(S.markers>0) oriented=true;      // never lock before the markers have given the sheet orientation
+  g_stable= (same && oriented)? g_stable+1 : 0;
   // search region for fingertips: the controls and markers, grown a little (keeps tape/clutter off the sheets out)
   std::vector<cv::Point2f> all=S.marker_pts;
   if(S.L.ok) for(int i=0;i<16;i++) for(auto& q:S.L.quad[i]) all.push_back(q);
@@ -283,7 +284,9 @@ int main(int argc,char** argv){
       fflush(stdout); }
 
     // debug image on request: touch ~/touchdemo/debug.req
-    if(access("debug.req",F_OK)==0){ unlink("debug.req"); cv::Mat dbg; cv::cvtColor(gray,dbg,cv::COLOR_GRAY2BGR); dbg.setTo(cv::Scalar(0,140,255),mask);
+    // debug.auto present: save a frame every 0.5 s while skin is on the controls (debug_0..19.png, rotating)
+    static double last_auto=0; static int auto_n=0; bool auto_dbg=(bo>0 && now_s()-last_auto>=0.5 && access("debug.auto",F_OK)==0);
+    if(auto_dbg || access("debug.req",F_OK)==0){ if(!auto_dbg) unlink("debug.req"); else last_auto=now_s(); cv::Mat dbg; cv::cvtColor(gray,dbg,cv::COLOR_GRAY2BGR); dbg.setTo(cv::Scalar(0,140,255),mask);
       if(S.paper.size()>=3){ std::vector<cv::Point> pp; for(auto& q:S.paper) pp.push_back(q); cv::polylines(dbg,pp,true,cv::Scalar(255,255,0),1); }
       for(int i=0;i<16 && L.ok;i++){ cv::Point2f c=(L.quad[i][0]+L.quad[i][1]+L.quad[i][2]+L.quad[i][3])/4; cv::putText(dbg,std::to_string(i+1),c+cv::Point2f(-6,5),0,0.4,cv::Scalar(255,0,0),1); }
       if(L.ok) for(int i=0;i<16;i++){ std::vector<cv::Point> q(L.quad[i].begin(),L.quad[i].end()); cv::polylines(dbg,q,true,cv::Scalar(0,200,0),1); }
@@ -291,7 +294,10 @@ int main(int argc,char** argv){
         cv::circle(dbg,Psl[k].top,4,cv::Scalar(255,0,0),-1); cv::putText(dbg,std::to_string(k+1),Psl[k].bottom+cv::Point2f(-5,18),0,0.6,cv::Scalar(255,0,0),2); }
       for(size_t k=0;k<Pdl.size();k++) cv::circle(dbg,Pdl[k].c,(int)Pdl[k].rad,(int)k==dial_active?cv::Scalar(0,0,255):cv::Scalar(0,200,0),2);
       if(tip_pt.x>=0) cv::circle(dbg,tip_pt,7,cv::Scalar(255,0,255),2);
-      cv::imwrite("debug.png",dbg); fprintf(stderr,"[debug] wrote debug.png\n"); }
+      char lbl[160]; snprintf(lbl,sizeof lbl,"t=%.1f tip=%s button=%d slider=%d dial=%d pressed=%d skin=%d",now_s()-t_start,tip_pt.x>=0?"yes":"no",on_button+1,on_slider+1,on_dial+1,pressed+1,bo);
+      cv::putText(dbg,lbl,cv::Point(8,22),0,0.6,cv::Scalar(0,0,255),2);
+      std::string fn= auto_dbg? "debug_"+std::to_string(auto_n++%20)+".png" : std::string("debug.png");
+      cv::imwrite(fn,dbg); if(!auto_dbg) fprintf(stderr,"[debug] wrote debug.png\n"); }
   }
   if(dial_active>=0 && dial_frames>=3) dj("%c.scratch 0",dial_active==1?'b':'a');
   camera_stop_viewfinder(h); camera_close(h); return 0;
