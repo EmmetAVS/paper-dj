@@ -184,6 +184,23 @@ def test_deck(k, pads):
     send(f"{k}.pause", 0.1)
 
 
+def test_track_end():
+    print("\nEnd of track")
+    reset()
+    for k in "ab":
+        length = deck(k)["len"]
+        send(f"{k}.seek {length - 0.3:.2f};{k}.play", 0.8)
+        check(f"deck {k.upper()} stops at the end", deck(k)["playing"] == 0)
+        send(f"pad {'2' if k == 'a' else '4'}", 0.1)    # cue while stopped at the end
+        check(f"cue at the end is not stored there (deck {k.upper()})", deck(k)["cue"] < length - 0.5)
+        send(f"{k}.seek {length - 0.2:.2f}", 0.1)
+        send(f"pad {'1' if k == 'a' else '3'}", 0.4)    # play from the end
+        d = deck(k)
+        check(f"play at the end restarts the song (deck {k.upper()})", d["playing"] == 1 and d["pos"] < 1.0,
+              f"pos {d['pos']:.2f}")
+        send(f"{k}.pause", 0.05)
+
+
 def test_samples():
     print("\nSamples")
     reset()
@@ -273,6 +290,7 @@ def main():
         check("BPM detection deck B (124)", abs(st["decks"][1]["bpm"] - 124) < 0.1)
         test_deck("a", (1, 2, 5, 6, 9, 10, 13))
         test_deck("b", (3, 4, 7, 8, 11, 12, 15))
+        test_track_end()
         test_samples()
         test_both_at_once()
         test_priorities()

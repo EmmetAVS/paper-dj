@@ -49,8 +49,8 @@ def render(bpm, bars, bass_notes, hat_every, seed, path):
 
 if __name__ == "__main__":
     os.makedirs("tracks", exist_ok=True)
-    render(120, 16, [55.0, 55.0, 65.41, 49.0], 4, 1, "tracks/testA_120bpm.wav")   # A, A, C, G
-    render(124, 16, [73.42, 61.74, 82.41, 73.42], 2, 2, "tracks/testB_124bpm.wav")  # D, B, E, D
+    render(120, 64, [55.0, 55.0, 65.41, 49.0], 4, 1, "tracks/testA_120bpm.wav")   # A, A, C, G
+    render(124, 64, [73.42, 61.74, 82.41, 73.42], 2, 2, "tracks/testB_124bpm.wav")  # D, B, E, D
 
 
 def write_wav(path, frames):

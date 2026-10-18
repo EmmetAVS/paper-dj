@@ -367,7 +367,9 @@ async function poll() {
     s.decks.forEach((dk, i) => {
       const h = hands["ab"[i]];
       h.bpm.textContent = dk.bpm ? dk.eff_bpm.toFixed(1) + " BPM" : "";
-      h.name.textContent = (dk.scratching ? "◉ " : dk.playing ? "▶ " : "❚❚ ") + dk.name;
+      const ended = !dk.playing && dk.len && dk.pos >= dk.len - 0.5;
+      h.name.textContent = ended ? "■ end of song · press Play to restart"
+                                 : (dk.scratching ? "◉ " : dk.playing ? "▶ " : "❚❚ ") + dk.name;
       const pct = t => dk.len ? (100 * t / dk.len) + "%" : "0";
       h.pos.style.width = pct(dk.pos);
       h.loop.style.display = dk.loop ? "block" : "none";

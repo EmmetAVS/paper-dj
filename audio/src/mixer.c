@@ -51,6 +51,21 @@ static double snap(const mixer_t *m, const deck_t *d, double p) {
     double bf = beat_frames(d);
     return clamp_pos(d, d->grid + round((p - d->grid) / bf) * bf);
 }
+/* Within the last half second of the track: playing from here would stop at once. */
+static int at_end(const deck_t *d) {
+    return d->track.frames > 1 && d->pos >= (double)d->track.frames - 0.5 * d->track.rate;
+}
+/* Play from here, or restart if the deck has run off the end of the track. */
+static void start_play(deck_t *d) {
+    if (d->track.frames < 2) return;
+    if (at_end(d)) {
+        double end_zone = (double)d->track.frames - 0.5 * d->track.rate;
+        d->pending_seek = d->cue < end_zone ? d->cue : 0;   /* back to the cue point, else the top */
+        d->loop_on = 0;
+    }
+    d->playing = 1;
+}
+
 static double wrap_half(double x) { return x - floor(x + 0.5); }  /* -> [-0.5, 0.5) */
 
 /* ---- filters ------------------------------------------------------------- */
@@ -239,15 +254,17 @@ void mixer_apply(mixer_t *m, const cmd_t *c) {
     deck_t *d = &m->deck[c->deck];
     int loaded = d->track.frames > 1;
     switch (c->op) {
-    case CMD_PLAY:   d->playing = loaded; break;
+    case CMD_PLAY:   start_play(d); break;
     case CMD_PAUSE:  d->playing = 0; break;
-    case CMD_TOGGLE: d->playing = !d->playing && loaded; break;
+    case CMD_TOGGLE: if (d->playing) d->playing = 0; else start_play(d); break;
     case CMD_CUE:
-        /* CDJ-style: playing -> back to cue and stop; stopped -> set cue here */
+        /* CDJ-style: playing -> back to cue and stop; stopped -> set cue here.
+         * Never store a cue in the last half second: it would trap the deck at the end. */
         if (d->playing) { d->playing = 0; d->pending_seek = d->cue; d->loop_on = 0; }
+        else if (at_end(d)) d->pending_seek = 0;
         else d->cue = snap(m, d, d->pos);
         break;
-    case CMD_SETCUE: d->cue = snap(m, d, d->pos); break;
+    case CMD_SETCUE: if (!at_end(d)) d->cue = snap(m, d, d->pos); break;
     case CMD_SEEK:
         d->pending_seek = clamp_pos(d, c->value * (d->track.rate ? d->track.rate : OUT_RATE));
         d->loop_on = 0;
