@@ -8,6 +8,7 @@
  * work or a slow phone can never make the audio miss a deadline.
  */
 #include "engine.h"
+#include "library.h"
 
 #include <errno.h>
 #include <sched.h>
@@ -38,6 +39,16 @@ int engine_submit_text(engine_t *e, const char *text, uint64_t t_recv_ns) {
     int accepted = 0;
     char *save = NULL;
     for (char *tok = strtok_r(buf, ";\n\r", &save); tok; tok = strtok_r(NULL, ";\n\r", &save)) {
+        while (*tok == ' ' || *tok == '\t') tok++;
+        /* "a.load <song.wav>": handled by the library's loader thread, not the render thread */
+        if ((tok[0] == 'a' || tok[0] == 'b') && strncmp(tok + 1, ".load ", 6) == 0) {
+            char *f = tok + 7, *end;
+            while (*f == ' ') f++;
+            for (end = f + strlen(f); end > f && (end[-1] == ' ' || end[-1] == '\t'); ) *--end = 0;
+            if (e->lib && library_request_load(e, tok[0] - 'a', f) == 0) accepted++;
+            else fprintf(stderr, "[control] can't load '%s' onto deck %c now\n", f, tok[0] - 32);
+            continue;
+        }
         cmd_t c;
         if (cmd_parse(tok, &c) != 0) {
             fprintf(stderr, "[control] bad command: '%s'\n", tok);
@@ -88,6 +99,9 @@ static void *render_thread(void *arg) {
         atomic_max_u64(&e->stats.max_late_ns, late);
         if (late > (uint64_t)BLOCK_FRAMES * 1000000000ull / OUT_RATE)
             atomic_fetch_add(&e->stats.deadline_misses, 1);
+
+        /* a song the loader finished: swap it in now, between blocks (two pointer exchanges) */
+        if (e->lib) library_poll_render(e);
 
         /* apply everything that arrived since the last block */
         cmd_t c;
@@ -147,8 +161,10 @@ static void usage(const char *argv0) {
         "usage: %s [-a deckA.wav] [-b deckB.wav] [-1 sample1.wav] [-2 sample2.wav]\n"
         "          [-A bpmA] [-B bpmB] [-p http_port] [-u udp_port]\n"
         "          [-w web/index.html] [-R render_prio] [-C control_prio] [-S stream_prio]\n"
-        "          [-d /dev/paperdj]\n"
-        "defaults: -p 8080 -u 9000 -w web/index.html -R 50 -C 45 -S 40 -d /dev/paperdj; BPM is auto-detected\n          (-A/-B 124 = \"about 124\": locks the exact tempo and beats within +-2 BPM)\n", argv0);
+        "          [-d /dev/paperdj] [-L songs_folder]\n"
+        "defaults: -p 8080 -u 9000 -w web/index.html -R 50 -C 45 -S 40 -d /dev/paperdj; BPM is auto-detected\n          (-A/-B 124 = \"about 124\": locks the exact tempo and beats within +-2 BPM)\n"
+        "-L: song library (load/upload songs from the page); the songs last loaded there\n"
+        "    are loaded again at startup, -a/-b are used until then\n", argv0);
 }
 
 static int load_wav(track_t *t, char *name, size_t namelen, const char *path) {
@@ -177,9 +193,10 @@ int main(int argc, char **argv) {
     double bpm_override[NDECKS] = { 0, 0 };
     const char *web = "web/index.html";
     e->dev_path = "/dev/paperdj";
+    const char *lib_dir = NULL;
 
     int opt;
-    while ((opt = getopt(argc, argv, "a:b:1:2:A:B:p:u:w:R:C:S:d:h")) != -1) {
+    while ((opt = getopt(argc, argv, "a:b:1:2:A:B:p:u:w:R:C:S:d:L:h")) != -1) {
         switch (opt) {
         case 'a': paths[0] = optarg; break;
         case 'b': paths[1] = optarg; break;
@@ -194,15 +211,27 @@ int main(int argc, char **argv) {
         case 'C': e->prio_control = atoi(optarg); break;
         case 'S': e->prio_stream = atoi(optarg); break;
         case 'd': e->dev_path = optarg; break;
+        case 'L': lib_dir = optarg; break;
         default: usage(argv[0]); return opt == 'h' ? 0 : 1;
         }
     }
 
     if (mixer_init(&e->mixer) != 0) { fprintf(stderr, "out of memory\n"); return 1; }
+    if (lib_dir && library_init(e, lib_dir) != 0) { fprintf(stderr, "out of memory\n"); return 1; }
     for (int i = 0; i < NDECKS; i++) {
         deck_t *d = &e->mixer.deck[i];
         snprintf(d->name, sizeof d->name, "(empty)");
-        if (paths[i] && load_wav(&d->track, d->name, sizeof d->name, paths[i]) == 0) {
+        if (e->lib) {
+            /* the song last loaded from the page wins over -a/-b */
+            const char *rem = library_remembered(e, i);
+            char path[512];
+            if (rem) {
+                snprintf(path, sizeof path, "%s/%s", lib_dir, rem);
+                library_startup_load(e, i, path, 0);
+            } else if (paths[i]) {
+                library_startup_load(e, i, paths[i], bpm_override[i]);
+            }
+        } else if (paths[i] && load_wav(&d->track, d->name, sizeof d->name, paths[i]) == 0) {
             if (bpm_override[i] > 0) mixer_analyze_deck_hint(&e->mixer, i, bpm_override[i]);
             else mixer_analyze_deck(&e->mixer, i);
         }
@@ -230,6 +259,8 @@ int main(int argc, char **argv) {
     if (start_thread(&th_render, render_thread, e) ||
         start_thread(&th_udp, udp_control_thread, e) ||
         start_thread(&th_http, http_server_thread, e)) return 1;
+    pthread_t th_lib;  /* song loader: normal priority, never joined (it may be mid-load at exit) */
+    if (e->lib && start_thread(&th_lib, library_thread, e) == 0) pthread_detach(th_lib);
     pthread_t th_rm;   /* /dev/paperdj (QNX, root only); blocks forever, so never joined */
     if (start_thread(&th_rm, resmgr_thread, e) == 0) pthread_detach(th_rm);
 

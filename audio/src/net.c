@@ -1,8 +1,10 @@
 /* Networking: UDP control input and a tiny HTTP server that serves the phone
  * page, the live PCM stream, a /cmd endpoint for testing, and /stats. */
 #include "engine.h"
+#include "library.h"
 
 #include <arpa/inet.h>
+#include <ctype.h>
 #include <errno.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
@@ -187,6 +189,47 @@ static void serve_stats(engine_t *e, int fd) {
     reply(fd, "200 OK", "application/json", b, (size_t)n);
 }
 
+/* Value of a header (case-insensitive name), or NULL. */
+static const char *header(const char *req, const char *name) {
+    size_t n = strlen(name);
+    for (const char *p = strstr(req, "\r\n"); p && p[2] != '\r'; p = strstr(p + 2, "\r\n")) {
+        const char *h = p + 2;
+        size_t i = 0;
+        while (i < n && h[i] && tolower((unsigned char)h[i]) == tolower((unsigned char)name[i])) i++;
+        if (i == n && h[n] == ':') { h += n + 1; while (*h == ' ') h++; return h; }
+    }
+    return NULL;
+}
+
+/* Value of ?key= in a path (URL-decoded into out). */
+static int query(const char *path, const char *key, char *out, size_t n) {
+    const char *q = strchr(path, '?');
+    size_t k = strlen(key);
+    while (q) {
+        q++;
+        if (strncmp(q, key, k) == 0 && q[k] == '=') {
+            const char *v = q + k + 1;
+            size_t len = strcspn(v, "&");
+            if (len >= n) len = n - 1;
+            memcpy(out, v, len);
+            out[len] = 0;
+            url_decode(out);
+            return 0;
+        }
+        q = strchr(q, '&');
+    }
+    return -1;
+}
+
+static void serve_library(engine_t *e, int fd) {
+    size_t cap = 256 * 1024;
+    char *b = malloc(cap);
+    if (!b) { reply(fd, "500 Internal Server Error", "text/plain", "", 0); return; }
+    int n = library_json(e, b, cap);
+    reply(fd, "200 OK", "application/json", b, (size_t)n);
+    free(b);
+}
+
 static void *conn_thread(void *arg) {
     conn_t c = *(conn_t *)arg;
     free(arg);
@@ -208,7 +251,33 @@ static void *conn_thread(void *arg) {
     char method[8] = {0}, path[2048] = {0};
     if (sscanf(req, "%7s %2047s", method, path) == 2) {
         uint64_t t = now_ns();
-        if (!strcmp(path, "/") || !strcmp(path, "/index.html")) {
+        if (!strcmp(method, "POST") && !strncmp(path, "/upload", 7)) {
+            /* body = a WAV the page built from the dropped song; may already be partly in req */
+            char name[256] = "song.wav", msg[300];
+            query(path, "name", name, sizeof name);
+            const char *end = strstr(req, "\r\n\r\n"), *cl = header(req, "Content-Length");
+            size_t total = cl ? strtoul(cl, NULL, 10) : 0;
+            size_t pre = end ? len - (size_t)(end + 4 - req) : 0;
+            struct timeval tv10 = { .tv_sec = 15, .tv_usec = 0 };   /* slow Wi-Fi */
+            setsockopt(c.fd, SOL_SOCKET, SO_RCVTIMEO, &tv10, sizeof tv10);
+            if (!end || !total) {
+                reply(c.fd, "411 Length Required", "text/plain", "need Content-Length\n", 20);
+            } else if (library_save_upload(e, name, c.fd, end + 4, pre, total, msg, sizeof msg) == 0) {
+                char body[400];
+                int n = snprintf(body, sizeof body, "{\"file\":\"%s\"}", msg);
+                reply(c.fd, "200 OK", "application/json", body, (size_t)n);
+            } else {
+                reply(c.fd, "400 Bad Request", "text/plain", msg, strlen(msg));
+            }
+        } else if (!strcmp(path, "/library")) {
+            serve_library(e, c.fd);
+        } else if (!strncmp(path, "/hint?", 6)) {
+            char f[256] = "", v[32] = "";
+            query(path, "f", f, sizeof f);
+            query(path, "bpm", v, sizeof v);
+            int ok = library_set_hint(e, f, atof(v)) == 0;
+            reply(c.fd, ok ? "204 No Content" : "400 Bad Request", "text/plain", "", 0);
+        } else if (!strcmp(path, "/") || !strcmp(path, "/index.html")) {
             if (e->index_html) reply(c.fd, "200 OK", "text/html; charset=utf-8", e->index_html, e->index_len);
             else reply(c.fd, "404 Not Found", "text/plain", "index.html not loaded\n", 22);
         } else if (!strcmp(path, "/stream")) {

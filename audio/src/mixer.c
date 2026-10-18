@@ -134,6 +134,33 @@ void mixer_analyze_deck_hint(mixer_t *m, int i, double hint) {
             d->bpm, hint, d->track.rate ? d->grid / d->track.rate : 0.0);
 }
 
+int mixer_deck_busy(const mixer_t *m, int i) {
+    const deck_t *d = &m->deck[i];
+    return d->playing || d->gate > 0.0f || d->scratching;
+}
+
+void mixer_install_track(mixer_t *m, int i, track_t *t, const char *name, double bpm, double grid) {
+    deck_t *d = &m->deck[i];
+    track_t old = d->track;
+    d->track = *t;
+    *t = old;
+    size_t n = strlen(name);
+    if (n > sizeof d->name - 1) n = sizeof d->name - 1;
+    memcpy(d->name, name, n);
+    d->name[n] = 0;
+    d->bpm = bpm;
+    d->grid = grid;
+    d->pos = 0; d->vel = 0; d->cue = 0; d->pending_seek = -1; d->bend = 0;
+    d->playing = 0; d->gate = 0;
+    for (int h = 0; h < NHOTCUES; h++) d->hotcue[h] = -1;
+    d->loop_on = 0;
+    d->sync_on = 0; d->sync_adj = 0;
+    d->fx_on = 0;
+    d->scratching = 0; d->scr_anchored = 0;
+    d->target[P_RATE] = d->cur[P_RATE] = 1.0f;     /* new song starts at its own tempo */
+    d->target[P_NUDGE] = d->cur[P_NUDGE] = 0.0f;
+}
+
 /* ---- command parsing ----------------------------------------------------- */
 
 enum { NOVAL, NEEDVAL, OPTVAL };

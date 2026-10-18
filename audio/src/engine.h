@@ -5,6 +5,9 @@
 #include "mixer.h"
 #include <pthread.h>
 
+typedef struct loaded_track loaded_track_t;   /* library.h */
+typedef struct library library_t;
+
 typedef struct {
     mixer_t          mixer;          /* owned by the render thread */
     cmdq_t           cmdq;           /* control -> render */
@@ -23,6 +26,9 @@ typedef struct {
     int              prio_control;
     int              prio_stream;
     const char      *dev_path;       /* QNX resource manager path, e.g. /dev/paperdj */
+    library_t       *lib;            /* song library, or NULL (no -L) */
+    _Atomic(loaded_track_t *) incoming[NDECKS];   /* loader -> render: song to swap in */
+    _Atomic(loaded_track_t *) outgoing[NDECKS];   /* render -> loader: old or rejected song to free */
     _Atomic int      running;
 } engine_t;
 

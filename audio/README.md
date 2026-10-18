@@ -99,6 +99,27 @@ Options:
 - `-w`: path to the phone page
 - `-R` / `-C` / `-S`: render, control and phone-stream priorities (defaults 50 / 45 / 40)
 - `-d`: resource manager path (default `/dev/paperdj`)
+- `-L`: song library folder (enables the Library panel, uploads and `a.load`)
+
+## Song library
+
+The page's **Library** panel lists every WAV in `songs/` (start the engine with `-L songs`), with
+its length and detected BPM. **Load A** / **Load B** puts a song on a deck in about a second.
+
+- **Loading never interrupts the music.** A normal-priority loader thread reads the file and finds the
+  beat grid. It then hands the finished track to the render thread through an atomic pointer, and the
+  render thread swaps it in between two blocks. The render thread still never waits, allocates or locks.
+- **A playing deck is locked.** Load buttons for a playing (or scratched) deck are greyed out, and the
+  engine refuses the request too, like a CDJ.
+- **Add songs from any browser.** Use **+ Add songs**, or drop files on the page. The browser decodes
+  MP3/M4A/WAV/FLAC, converts it to 48 kHz stereo WAV and uploads it (`POST /upload?name=`). Names are
+  cleaned up, and anything that isn't a WAV is refused.
+- **BPM fixes stick.** Type roughly the right tempo in a song's BPM box. It's saved, the song is
+  re-analyzed within ±2 BPM, and it's reloaded if it sits on a stopped deck.
+- **Remembers the decks.** `songs/.last` records what was last on each deck, and the engine loads
+  those songs again at startup (`-a`/`-b` are only used until then). Analysis results are cached in
+  `songs/.library.tsv`, so startup doesn't re-detect BPM.
+- Same command everywhere: `a.load <file.wav>` over `/dev/paperdj`, UDP or `/cmd`.
 
 ## `/dev/paperdj` (QNX resource manager)
 
@@ -137,6 +158,7 @@ for testing. Replace `a.` with `b.` for deck B.
 | `a.low` `a.mid` `a.high <-40..6 dB>` | 3-band EQ (−40 ≈ kill) |
 | `a.rate <0.5-1.5>` `a.nudge <-0.5..0.5>` | tempo / temporary speed offset |
 | `a.seek <s>` `a.bpm <bpm>` | jump / set tempo |
+| `a.load <file.wav>` | load a song from the library (refused while the deck plays) |
 | `s1.play` `s1.stop` `s1.vol <0-1>` | samples (`s2.` for sample 2) |
 | `xfade <0-1>` `master <0-1>` `quantize [0\|1]` | mixer / snap cues and loops to beats |
 

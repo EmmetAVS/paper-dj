@@ -100,6 +100,12 @@ int   mixer_init(mixer_t *m);
 void  mixer_analyze_deck(mixer_t *m, int deck);
 /* Re-detects around a known tempo (+-2 BPM) to lock the exact BPM and beat grid. */
 void  mixer_analyze_deck_hint(mixer_t *m, int deck, double bpm_hint);
+/* Render thread only. Swaps track *t into deck i (the deck's old track comes back in *t
+ * for the caller to free elsewhere), resets transport, cues, loops and sync, and keeps the
+ * mixer settings (volume, EQ, filter). Never allocates or blocks. */
+void  mixer_install_track(mixer_t *m, int i, track_t *t, const char *name, double bpm, double grid);
+/* Playing, still fading out, or being scratched: not safe to swap the song. */
+int   mixer_deck_busy(const mixer_t *m, int i);
 /* Parses one text command like "a.vol 0.7", "pad 5" or "xfade 0.3". 0 = ok. */
 int   cmd_parse(const char *text, cmd_t *out);
 void  mixer_apply(mixer_t *m, const cmd_t *c);

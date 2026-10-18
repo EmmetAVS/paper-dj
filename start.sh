@@ -2,7 +2,8 @@
 # Starts (or restarts) Paper DJ on the Pi: audio engine + paper board tracker. Runs at boot, and is
 # safe to run by hand any time:
 #   sh ~/paper-dj/start.sh                     songs set below
-#   sh ~/paper-dj/start.sh deckA.wav deckB.wav other songs (paths relative to audio/, BPM auto-detected)
+#   sh ~/paper-dj/start.sh deckA.wav deckB.wav other songs (paths relative to audio/; ignored once
+#                                              songs have been loaded from the page)
 #   sh ~/paper-dj/start.sh stop                stop everything
 # Runs as root (via sudo when started by hand) so the engine can create /dev/paperdj.
 #
@@ -11,9 +12,11 @@
 #         http://<pi>:8082  same as 8080, also reachable over IPv6 (phone hotspots)
 
 # ---- what to load --------------------------------------------------------
-A_SONG=songs/A_stardust_msbwy.wav
+# Songs live in audio/songs/ and are picked from the page's Library panel. The engine
+# reloads whatever was last on each deck; these two are only used until then.
+A_SONG="songs/Stardust - Music Sounds Better With You.wav"
 A_BPM=124                       # leave empty to auto-detect
-B_SONG=songs/B_john_summit_shiver.wav
+B_SONG="songs/John Summit - Shiver.wav"
 B_BPM=
 SAMPLE1=tracks/sample1_airhorn.wav
 SAMPLE2=tracks/sample2_zap.wav
@@ -42,7 +45,7 @@ if [ -n "$2" ]; then B_SONG=$2; B_BPM=; fi
 
 mkdir -p "$DIR/logs"
 cd "$DIR/audio" || exit 1
-set -- -a "$A_SONG" -b "$B_SONG" -1 "$SAMPLE1" -2 "$SAMPLE2"
+set -- -L songs -a "$A_SONG" -b "$B_SONG" -1 "$SAMPLE1" -2 "$SAMPLE2"
 [ -n "$A_BPM" ] && set -- "$@" -A "$A_BPM"
 [ -n "$B_BPM" ] && set -- "$@" -B "$B_BPM"
 nohup ./dj_engine "$@" > "$DIR/logs/engine.log" 2>&1 < /dev/null &

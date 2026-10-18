@@ -76,11 +76,33 @@
   summary { cursor: pointer; padding: 4px 0; }
   pre { white-space: pre-wrap; font-size: 11px; background: var(--panel); padding: 10px; border-radius: 8px; user-select: text; }
 
+  .lib { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px; margin-top: 10px; }
+  .lib-head { display: flex; align-items: center; gap: 6px 10px; margin-bottom: 4px; flex-wrap: wrap; }
+  .lib-head > b { font-size: 14px; letter-spacing: .04em; }
+  #lib-status { flex: 1; min-width: 0; font-size: 12px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #lib-status.err { color: var(--bad); } #lib-status.busy { color: var(--yellow); }
+  .add { padding: 7px 11px; border-radius: 7px; background: var(--text); color: var(--bg); font-weight: 650; font-size: 12px; cursor: pointer; white-space: nowrap; }
+  .song { display: grid; grid-template-columns: minmax(0, 1fr) 62px auto auto; gap: 6px; align-items: center; padding: 6px 0; border-top: 1px solid var(--line); }
+  .song .t b { display: block; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .song .t small { color: var(--dim); font-size: 11px; }
+  .song input { width: 100%; background: #24272c; border: 1px solid var(--line); color: var(--text); border-radius: 6px;
+                padding: 6px; font-size: 12px; text-align: right; -webkit-user-select: text; user-select: text; }
+  .song input::placeholder { color: var(--dim); }
+  .song button { padding: 7px 9px; border-radius: 7px; border: 1px solid var(--line); background: #24272c; color: var(--text);
+                 font-size: 12px; font-weight: 650; white-space: nowrap; }
+  .song button[data-d=a] { border-color: var(--a); color: var(--a); } .song button[data-d=b] { border-color: var(--b); color: var(--b); }
+  .song button[data-d=a].on { background: var(--a); color: var(--bg); } .song button[data-d=b].on { background: var(--b); color: var(--bg); }
+  .song button:disabled { opacity: .3; } .song button.on:disabled { opacity: 1; }
+  .lib-empty { color: var(--dim); font-size: 12px; padding: 10px 0 4px; border-top: 1px solid var(--line); }
+  body.dragging .lib { outline: 2px dashed var(--text); outline-offset: 3px; }
+
   @media (max-width: 640px) {
     .board { grid-template-columns: 1fr 1fr; }
     .pads-wrap { grid-column: 1 / -1; order: -1; }
     .meters { grid-template-columns: repeat(2, 1fr); }
     .jog { width: 116px; height: 116px; } .jog .mark { transform-origin: 2px 52px; }
+    #lib-status { order: 3; flex-basis: 100%; white-space: normal; }
+    .lib-head > b { flex: 1; }
   }
 </style>
 </head>
@@ -114,6 +136,14 @@
   <label>sample 2 <input type="range" data-p="s2.vol" min="0" max="1" step="0.01" value="0.8"><output></output></label>
   <label>latency <input type="range" id="target" min="40" max="300" step="10" value="100"><output></output></label>
   <div class="row"><button id="quant">Quantize: on</button></div>
+</div>
+
+<div class="lib" id="lib" hidden>
+  <div class="lib-head">
+    <b>LIBRARY</b><span id="lib-status">Pause a deck to load a song onto it. Drop audio files here to add them.</span>
+    <label class="add">+ Add songs<input type="file" id="lib-file" accept="audio/*,.mp3,.m4a,.aac,.wav,.flac,.ogg,.aif,.aiff" multiple hidden></label>
+  </div>
+  <div id="lib-list"></div>
 </div>
 
 <details><summary>Raw engine state</summary><pre id="debug"></pre></details>
@@ -392,6 +422,8 @@ async function poll() {
       const beat = Math.floor(((dk.pos - 0) * (dk.bpm || 120) / 60) % 4 + 4) % 4;
       h.phase.forEach((el, k) => el.classList.toggle("on", dk.playing && k === beat));
     });
+    lastStats = s;
+    updateLibButtons();
     $("debug").textContent = JSON.stringify(s, null, 1);
   } catch (_) {
     $("conn").textContent = "offline"; $("conn").className = "warn";
@@ -399,6 +431,138 @@ async function poll() {
 }
 setInterval(poll, 250);
 poll();
+
+/* ============================== library ============================== */
+let lib = { enabled: 0, songs: [], decks: [] }, libSig = "", lastStats = null, upMsg = null;
+const fmtLen = t => t > 0 ? Math.floor(t / 60) + ":" + String(Math.floor(t % 60)).padStart(2, "0") : "…";
+const songTitle = f => f.replace(/\.wav$/i, "");
+
+async function pollLib() {
+  try { lib = await (await fetch("/library", { cache: "no-store" })).json(); renderLib(); } catch (_) {}
+}
+function deckBusy(i) {
+  const dk = lastStats && lastStats.decks[i];
+  return !!(dk && (dk.playing || dk.scratching));
+}
+function renderLib() {
+  $("lib").hidden = !lib.enabled;
+  if (!lib.enabled) return;
+  const sig = JSON.stringify(lib.songs) + "|" + lib.decks.map(d => d.file).join("|");
+  const editing = document.activeElement && document.activeElement.classList.contains("hint");
+  if (sig !== libSig && !editing) {
+    libSig = sig;
+    const list = $("lib-list");
+    list.textContent = "";
+    if (!lib.songs.length) {
+      const p = document.createElement("div"); p.className = "lib-empty";
+      p.textContent = "No songs yet: tap “+ Add songs” or drop audio files on this page.";
+      list.append(p);
+    }
+    for (const sg of lib.songs) {
+      const row = document.createElement("div"); row.className = "song"; row.dataset.f = sg.file;
+      const t = document.createElement("div"); t.className = "t";
+      const b = document.createElement("b"); b.textContent = songTitle(sg.file);
+      const sm = document.createElement("small");
+      sm.textContent = fmtLen(sg.len) + (sg.bpm > 0 ? " · " + sg.bpm.toFixed(1) + " BPM" : sg.bpm < 0 ? " · no beat found" : " · analyzing…")
+                     + (sg.hint > 0 ? " (hint " + sg.hint + ")" : "");
+      t.append(b, sm);
+      const hint = document.createElement("input");
+      hint.className = "hint"; hint.type = "number"; hint.inputMode = "decimal"; hint.step = "0.1"; hint.min = "60"; hint.max = "200";
+      hint.placeholder = "fix BPM"; hint.title = "Wrong tempo? Type roughly the right BPM and press Enter";
+      hint.value = sg.hint > 0 ? sg.hint : "";
+      hint.addEventListener("change", () => {
+        fetch("/hint?f=" + encodeURIComponent(sg.file) + "&bpm=" + (+hint.value || 0), { cache: "no-store" }).then(pollLib);
+      });
+      row.append(t, hint);
+      for (const d of "ab") {
+        const btn = document.createElement("button"); btn.dataset.d = d;
+        btn.addEventListener("click", () => { send(d + ".load " + sg.file); setTimeout(pollLib, 150); });
+        row.append(btn);
+      }
+      list.append(row);
+    }
+  }
+  updateLibButtons();
+}
+function updateLibButtons() {
+  if (!lib.enabled) return;
+  document.querySelectorAll(".song").forEach(row => {
+    row.querySelectorAll("button").forEach(btn => {
+      const i = btn.dataset.d === "a" ? 0 : 1, D = btn.dataset.d.toUpperCase();
+      const on = lib.decks[i] && lib.decks[i].file === row.dataset.f;
+      const loading = lib.decks[i] && lib.decks[i].state === "loading";
+      btn.classList.toggle("on", on);
+      btn.textContent = on ? "On " + D : "Load " + D;
+      btn.disabled = on || loading || deckBusy(i);
+      btn.title = deckBusy(i) && !on ? "Pause deck " + D + " to load onto it" : "";
+    });
+  });
+  const st = $("lib-status");
+  const errs = lib.decks.filter(d => d.state === "error").map(d => d.msg);
+  const busy = lib.decks.filter(d => d.state === "loading").map(d => d.msg + "…");
+  if (upMsg) { st.textContent = upMsg.text; st.className = upMsg.err ? "err" : "busy"; }
+  else if (busy.length) { st.textContent = busy.join(" · "); st.className = "busy"; }
+  else if (errs.length) { st.textContent = errs.join(" · "); st.className = "err"; }
+  else { st.textContent = "Pause a deck to load a song onto it. Drop audio files here to add them."; st.className = ""; }
+}
+
+/* Adding songs: the browser decodes any format it can play (MP3, M4A, WAV, FLAC…),
+   resamples to 48 kHz stereo, wraps it as a 16-bit WAV and uploads it to the Pi. */
+function toWav(ab) {
+  const n = ab.length, L = ab.getChannelData(0), R = ab.numberOfChannels > 1 ? ab.getChannelData(1) : L;
+  const v = new DataView(new ArrayBuffer(44 + n * 4));
+  const str = (o, x) => { for (let k = 0; k < x.length; k++) v.setUint8(o + k, x.charCodeAt(k)); };
+  str(0, "RIFF"); v.setUint32(4, 36 + n * 4, true); str(8, "WAVE"); str(12, "fmt ");
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 2, true);
+  v.setUint32(24, 48000, true); v.setUint32(28, 48000 * 4, true); v.setUint16(32, 4, true); v.setUint16(34, 16, true);
+  str(36, "data"); v.setUint32(40, n * 4, true);
+  const q = x => (x = x < -1 ? -1 : x > 1 ? 1 : x, x < 0 ? x * 32768 : x * 32767);
+  for (let i = 0, o = 44; i < n; i++, o += 4) { v.setInt16(o, q(L[i]), true); v.setInt16(o + 2, q(R[i]), true); }
+  return v.buffer;
+}
+function upload(name, data, onp) {
+  return new Promise((res, rej) => {
+    const x = new XMLHttpRequest();
+    x.open("POST", "/upload?name=" + encodeURIComponent(name));
+    x.upload.onprogress = e => e.lengthComputable && onp(e.loaded / e.total);
+    x.onload = () => x.status === 200 ? res(JSON.parse(x.responseText)) : rej(new Error(x.responseText || "HTTP " + x.status));
+    x.onerror = () => rej(new Error("network error"));
+    x.send(data);
+  });
+}
+let adding = Promise.resolve();
+function addSongs(files) {
+  for (const f of files) adding = adding.then(async () => {
+    const say = (text, err) => { upMsg = { text, err }; updateLibButtons(); };
+    try {
+      say("Converting " + f.name + "…");
+      const oc = new (window.OfflineAudioContext || window.webkitOfflineAudioContext)(2, 48000, 48000);
+      const buf = await f.arrayBuffer();
+      // callback form for older Safari, promise form everywhere else (resolving twice is harmless)
+      const ab = await new Promise((res, rej) => {
+        const p = oc.decodeAudioData(buf, res, e => rej(new Error("this browser can't decode that file")));
+        if (p && p.then) p.then(res, () => rej(new Error("this browser can't decode that file")));
+      });
+      const r = await upload(f.name, toWav(ab), p => say("Uploading " + f.name + " · " + Math.round(p * 100) + "%"));
+      say("Added " + songTitle(r.file) + " · finding its BPM…");
+      setTimeout(() => { upMsg = null; updateLibButtons(); }, 4000);
+      pollLib();
+    } catch (err) {
+      say("Couldn't add " + f.name + ": " + (err && err.message || err), true);
+      setTimeout(() => { upMsg = null; updateLibButtons(); }, 8000);
+    }
+  });
+}
+$("lib-file").addEventListener("change", e => { addSongs([...e.target.files]); e.target.value = ""; });
+document.addEventListener("dragover", e => { e.preventDefault(); document.body.classList.add("dragging"); });
+document.addEventListener("dragleave", e => { if (!e.relatedTarget) document.body.classList.remove("dragging"); });
+document.addEventListener("drop", e => {
+  e.preventDefault(); document.body.classList.remove("dragging");
+  const files = [...(e.dataTransfer && e.dataTransfer.files || [])].filter(f => /^audio\/|\.(mp3|m4a|aac|wav|flac|ogg|aiff?)$/i.test(f.type + " " + f.name));
+  if (files.length) addSongs(files);
+});
+setInterval(pollLib, 1000);
+pollLib();
 </script>
 </body>
 </html>

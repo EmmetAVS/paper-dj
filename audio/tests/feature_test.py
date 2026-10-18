@@ -6,7 +6,7 @@ like the vision process will, and checks /stats plus the actual audio stream.
 
     make && python3 tools/make_test_tracks.py && python3 tests/feature_test.py
 """
-import json, math, os, platform, socket, struct, subprocess, sys, time, urllib.request
+import json, math, os, platform, socket, struct, subprocess, sys, time, urllib.error, urllib.request
 
 HTTP, UDP = 8090, 9090
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -286,6 +286,76 @@ def test_empty_deck(exe, t):
         proc.wait()
 
 
+def test_library(exe, t):
+    """Song library: list, load onto a stopped deck, refuse a playing deck, upload, BPM hint, remember."""
+    print("\n[library]")
+    import shutil, tempfile
+    d = tempfile.mkdtemp(prefix="pdj_lib_")
+    shutil.copy(f"{t}/testA_120bpm.wav", f"{d}/Song A.wav")
+    shutil.copy(f"{t}/testB_124bpm.wav", f"{d}/Song B.wav")
+    port, uport = HTTP + 2, UDP + 2
+    get = lambda path: urllib.request.urlopen(f"http://127.0.0.1:{port}{path}", timeout=5)
+    lib = lambda: json.load(get("/library"))
+    st = lambda: json.load(get("/stats"))
+    u = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    cmd = lambda c: (u.sendto(c.encode(), ("127.0.0.1", uport)), time.sleep(0.1))
+    def start():
+        p = subprocess.Popen([exe, "-L", d, "-a", f"{d}/Song A.wav", "-p", str(port), "-u", str(uport)],
+                             stderr=subprocess.DEVNULL)
+        wait_until_up(port)
+        return p
+    def wait_for(fn, timeout=8):
+        end = time.time() + timeout
+        while time.time() < end:
+            if fn(): return True
+            time.sleep(0.2)
+        return False
+    proc = start()
+    try:
+        ok = wait_for(lambda: all(s["bpm"] > 0 for s in lib()["songs"]))
+        L = lib()
+        check("library lists both songs with BPM", ok and [s["file"] for s in L["songs"]] == ["Song A.wav", "Song B.wav"]
+              and abs(L["songs"][1]["bpm"] - 124) < 0.1, str([(s["file"], s["bpm"]) for s in L["songs"]]))
+        cmd("a.play"); time.sleep(0.3)
+        cmd("b.load Song B.wav")
+        check("song loads onto a stopped deck while the other plays",
+              wait_for(lambda: st()["decks"][1]["name"] == "Song B") and abs(st()["decks"][1]["bpm"] - 124) < 0.1)
+        check("loading does not glitch the playing deck", st()["deadline_misses"] == 0 or platform.system() != "QNX")
+        cmd("a.load Song B.wav"); time.sleep(0.6)
+        L = lib()
+        check("loading onto a playing deck is refused", st()["decks"][0]["name"] == "Song A"
+              and L["decks"][0]["state"] == "error", L["decks"][0]["msg"])
+        cmd("a.pause"); time.sleep(0.2)
+        cmd("a.load ../etc/passwd.wav"); cmd("a.load .library.tsv"); time.sleep(0.3)
+        check("paths outside the library are rejected", st()["decks"][0]["name"] == "Song A")
+        # upload: a WAV is stored under a cleaned-up name; anything else is refused
+        body = open(f"{t}/testB_124bpm.wav", "rb").read()
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/upload?name=" + urllib.request.quote("My/Track: v2.mp3"),
+                                     data=body, method="POST")
+        r = json.load(urllib.request.urlopen(req, timeout=20))
+        check("upload stores the song under a safe name", r.get("file") == "My_Track_ v2.wav" and os.path.exists(f"{d}/My_Track_ v2.wav"), str(r))
+        bad = urllib.request.Request(f"http://127.0.0.1:{port}/upload?name=x.wav", data=b"not audio at all" * 10, method="POST")
+        try:
+            urllib.request.urlopen(bad, timeout=5); refused = False
+        except urllib.error.HTTPError as e:
+            refused = e.code == 400
+        check("upload refuses non-WAV data", refused and not os.path.exists(f"{d}/x.wav"))
+        check("uploaded song gets analyzed", wait_for(lambda: any(s["file"] == "My_Track_ v2.wav" and s["bpm"] > 0 for s in lib()["songs"])))
+        get("/hint?f=" + urllib.request.quote("Song A.wav") + "&bpm=121")
+        check("BPM hint is stored and applied", wait_for(lambda: any(s["file"] == "Song A.wav" and s["hint"] == 121 for s in lib()["songs"]))
+              and wait_for(lambda: abs(st()["decks"][0]["bpm"] - 121) < 1.5))
+    finally:
+        proc.terminate(); proc.wait()
+    proc = start()
+    try:
+        s = st()
+        check("last loaded songs come back after a restart", [x["name"] for x in s["decks"]] == ["Song A", "Song B"],
+              str([x["name"] for x in s["decks"]]))
+    finally:
+        proc.terminate(); proc.wait()
+        shutil.rmtree(d, ignore_errors=True)
+
+
 def main():
     exe = os.path.join(ROOT, "dj_engine")
     t = os.path.join(ROOT, "tracks")
@@ -312,6 +382,7 @@ def main():
         proc.terminate()
         proc.wait()
     test_empty_deck(exe, t)
+    test_library(exe, t)
     print(f"\n{'ALL PASSED' if fails == 0 else f'{fails} FAILED'}")
     sys.exit(1 if fails else 0)
 
