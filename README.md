@@ -24,4 +24,7 @@ paper board ──camera──► vision (QNX, ONNX hand tracking) ──UDP─�
 |---|---|---|---|---|---|
 | audio render | commands in | phone streams | camera + pads | hand model (sporadic) | everything else |
 
+Verified on our QNX Pi 5: 70/70 engine tests pass, and audio holds 0 deadline misses while CPU hogs at priority 35
+starve vision. See [`demo/README.md`](demo/README.md).
+
 Start with [`audio/README.md`](audio/README.md), then [`vision/README.md`](vision/README.md).

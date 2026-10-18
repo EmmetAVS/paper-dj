@@ -101,13 +101,12 @@ pidin -p vision_skeleton  # capture at 32f; model shows sporadic at 28 (or 8 whi
 **Judge demo:** with a mix playing and vision running, start a CPU hog *between* vision and audio:
 
 ```sh
-on -p 35 yes > /dev/null &
+sh ~/paper-dj/demo/stress_demo.sh   # hogs at priority 35, see demo/README.md
 ```
 
 Vision slows down, but the engine's `deadline_misses` stays at 0 and the phone keeps playing
-cleanly. Then `slay yes`.
+cleanly. The hogs stop by themselves after 12 s. Results from our Pi are in `demo/README.md`.
 
-Not yet verified on QNX: everything here builds and runs on Linux, but Linux has no sporadic
-scheduling, so the skeleton falls back to normal priority there and says so. The QNX code path is
-written against the QNX 8.0 `sched_param` docs. Run `vision_skeleton` on the Pi first thing and
-check the `[model] SCHED_SPORADIC 28 -> 8 …` line.
+Verified on our QNX Pi 5: `[model] SCHED_SPORADIC 28 -> 8, budget 20.0 ms every 33.3 ms`, and `pidin`
+shows the model at `28s` and capture at `32f`. (On Linux there is no sporadic scheduling, so the
+skeleton falls back to normal priority there and says so.)

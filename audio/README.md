@@ -154,8 +154,8 @@ all 70 checks pass (including real-time priority of the phone stream and an empt
 - `cmd_lat_us`, `cmd_lat_us_max`: time from a command arriving to it being applied to the audio
 - per-deck state: BPM, beat phase, hot cues, loop, sync, fx, scratching, and every slider
 
-**Stress demo:** while a mix plays, load the CPU (`for i in 1 2 3 4; do yes > /dev/null & done`, then
-`slay yes` afterwards) and show `deadline_misses` holding at 0. `pidin -p dj_engine` shows the thread
+**Stress demo:** while a mix plays, load the CPU (`sh ../demo/stress_demo.sh   # see demo/README.md`, then
+the hogs stop by themselves) and show `deadline_misses` holding at 0. `pidin -p dj_engine` shows the thread
 priorities (`50f` = priority 50, FIFO).
 
 Measured on a 2-vCPU Linux cloud VM with every feature on at once: about 20–70 µs per 5.33 ms
